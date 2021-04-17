@@ -1,0 +1,50 @@
+svg {
+  font: 10px monotype;
+  padding: 10px;
+}
+
+.axis,
+.frame {
+  shape-rendering: crispEdges;
+}
+
+
+#scatterplot-matrix .axis line {
+  stroke: #ddd;
+}
+
+.axis path {
+  display: none;
+}
+
+.cell text {
+  font-weight: bold;
+  fill: black;
+}
+
+.frame {
+  fill: none;
+  stroke: #aaa;
+}
+
+circle {
+  fill-opacity: .7;
+}
+
+circle.hidden {
+  fill: #ccc !important;
+}
+
+.extent {
+  fill: #000;
+  fill-opacity: .125;
+  stroke: #fff;
+}
+
+
+path.regressionLine {
+  stroke: #43A047;
+  fill: none;
+  stroke-width: 1.2;
+  stroke-dasharray: 3,5;
+}
