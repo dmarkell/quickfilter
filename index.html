@@ -31,6 +31,7 @@
 
   </head>
   <body>
+    
 
     <script type="text/javascript" src="./js/crossfilter.v1.min.js"></script>
     <script type="text/javascript" src="./js/d3.v3.min.js"></script>   
@@ -57,34 +58,6 @@
         console.timeEnd(label)
       }
     };
-
-    var lap_times = [];
-    var lap = function(args) {
-        args = args || {};
-        var cur_time = new Date();
-        if (typeof args.start_time != 'undefined' && args.log != false) {
-          var time_elapsed = (cur_time - args.start_time);
-          var desc = args.desc || 'Unknown';
-        }
-
-        lap_times.push(cur_time)
-        return cur_time;
-    };
-
-    var lap_from_lap_ix = function(ix, desc) {
-      var desc = desc || "Time since top start";
-      lap({"start_time": lap_times[ix], "desc": desc});
-    }
-
-    var lap_from_top = function(desc) {
-      var desc = desc || "Time since top start";
-      lap_from_lap_ix(0, desc);
-    }
-
-    var lap_from_last = function(desc) {
-      var desc = desc || "Time since last start";
-      lap_from_lap_ix(lap_times.length-1, desc);
-    }
 
     var titleCase = function(str) {
       str = str.toLowerCase().split(' ');
@@ -316,20 +289,6 @@
             meta_dims[n]['scale'] = 'log'
             r[n] = log_val;         
 
-          }
-        })
-      });
-    }
-
-  var convert_to_nullifzero = function(rows, dims) {
-
-      rows.forEach(function(r) {
-        // log
-        dims.forEach(function(n) {
-          var val = r[n];
-          if (val == null) {
-
-            r[n] = 0;
           }
         })
       });
@@ -583,11 +542,10 @@
     var number_types = ['number', 'count', 'sum', 'count_distinct'];
     // TODO: this should do a match for `distinct id`, `distinctid`, `distinct_id` etc for each element:
     var primary_key_labels = [
-      "id", "distinct id", "user id", "subject id",
-      "actor_user_id", "video_content_tag", "video_owner_id",
+      "id", "distinct id",
     ];
 
-    var selected_fieldnames_to_payload = function(selected_dim_names, selected_pk_names, total_meta_lookup) {
+    var selected_fieldnames_to_payload = function(total_meta_lookup, selected_dim_names, selected_pk_names) {
 
       var payload = {'primary_keys': {}, 'dimensions': {}};
 
@@ -602,20 +560,18 @@
           // TODO: take week specifying week start
           // TODO: rather than get these from selected_dim_names, these should probably come in as a separate
           // parameter includeing date_subtypes
-          var els = _.map(
-            _.keys(time_settings)
-            , function(d) { return item.label_short + '_' + d }
-          )
-          var derived_date_els = _.intersection(els, selected_dim_names)
 
-          derived_date_els.forEach(function(el) {
-            payload['dimensions'][el] = {
-              'label_short': el,
-              'type': 'date',
-              'date_source': item.label_short,
-              'time_incr': el.split('date_')[1]
+          _.keys(time_settings).forEach(function(d) {
+            var derived_date_el = item.label_short + '_' + d;
+            if ( selected_dim_names.indexOf(derived_date_el) != -1 ) {
+              payload['dimensions'][derived_date_el] = {
+                'label_short': derived_date_el,
+                'type': 'date',
+                'date_source': item.label_short,
+                'time_incr': d
+              }
             }
-          })
+          });
 
           if ( selected_dim_names.indexOf(item.label_short) != -1 ) {
 
@@ -807,23 +763,346 @@
 
     }
 
-    var create_all = function(meta_lookup, total_meta_lookup) {
+   function RefreshTable(recordsTable, dims, max_table_size, primary_key) {
+
+      dc.events.trigger(function() {
+        var cur_table_size = recordsTable.fnGetData().length;
+        var filtered_data = dims[primary_key].top(max_table_size);
+        recordsTable.fnClearTable();
+        if (filtered_data.length > 0) {
+          recordsTable.fnAddData(filtered_data);  
+          recordsTable.fnDraw();
+          // re-hide table if it was hidden before
+          if ($("#table-toggler").text() == '(show)') {
+            $("#data-datatable tr").hide();
+          }
+        }
+      });
+    }
+
+    function make_row_chart(dim, options, dims, groups) {
+
+      var default_orderer = function(d) { return -d.value };
       
-      var meta_pks = meta_lookup.primary_keys;
-      var meta_dims = meta_lookup.dimensions;
+      var num_rows = 5;
+      var group = options && options['group'] || dim + 's';
+      var xFormatter = options && options['xFormatter'] || formatNumberGeneral;
+      var w = options && options['w'] || 350;
+      var h = options && options['h'] || 50 * num_rows;
+      var orderer = options && options['orderer'] || default_orderer;
 
-      var element = $('body');
-      element.html("")
+      rowChart = dc.rowChart("#" + dim)
+        .width(w)
+        .height(h)
+        .dimension(dims[dim])
+        .group(groups[group])
+        .elasticX(true)
+        .rowsCap(num_rows)
+        .valueAccessor(function(d) { return d.value })
+        .ordering(orderer)
+      ;
+      
+      rowChart.xAxis().tickFormat(xFormatter);
 
-      d3.json(fnm_path + data_fnm, function(err, results) {
-          
-        if (err) {
-          console.log(err)
+      return rowChart;
+
+    };
+
+    function make_pie_chart(dim, options, dims, groups, all) {
+
+      var group = options && options['group'] || dim + 's';
+
+      var pie = dc.pieChart("#" + dim)
+        .radius(75)
+        .innerRadius(10)
+        .height(150).width(250)
+        .dimension(dims[dim])
+        .group(groups[group])
+        .label(function (d) {
+
+              // if (pie.hasFilter() && ! pie.hasFilter(d.data.key)) {
+              if (pie.hasFilter() && ! pie.hasFilter(d.key)) {
+                  // return d.data.key + ' 0%';
+                  return d.key + ' 0%';
+              }
+              // var label = d.data.key;
+              var label = d.key;
+              if (all.value()) {
+                  label += ' ' + Math.floor(d.value / all.value() * 100) + '%';
+              }
+              return label;
+          })
+        ;
+
+      return pie;
+
+    };
+
+    function make_hist_chart_date(dim, options, dims, groups) {
+
+      var defaultFilterPrinter = function(filters, tick_format) {
+      
+          var filter = filters[0], s='';
+          s += (tick_format(filter[0]) + ' -> ' + tick_format(filter[1]));
+          return s;
+      }
+
+      var defaultValueAccessor = function(d) {
+
+        return d.value
+      };
+
+      var group = options && options['group'] || dim + 's';
+      var xFormatter = options && options['xFormatter'] || function(n) { return formatNumber(parseInt(n))};
+      var yAxisFormatter = options && options['yAxisFormatter'] || formatNumber;
+      var valueAccessor = options && options['valueAccessor'] || defaultValueAccessor;
+      var w = options && options['w'] || 350;
+      var h = options && options['h'] || 150;
+      var rounder = options && options['rounder'] || dc.round.ceil;
+      var grouper = options && options['grouper'] || groups[group];
+      var elasticY = options && options['elasticY'] || true;
+      var elasticX = options && options['elasticX'] || false;
+      var filter = options && options['filter'] || null;
+      var time_incr = options && options['time_incr'] || 'day'
+      
+      var tick_format = d3.time.format(time_settings[time_incr].format)
+      var filterPrinter = options && options['filterPrinter'] || function(f) { return defaultFilterPrinter(f, tick_format) };
+
+      var time_interval = time_settings[time_incr].interval;
+      var time_interval_parent = time_settings[time_incr].interval_parent
+
+      var bins = groups[group].top(Infinity).map(function(item) {
+        return item.key;
+      }).sort(function(a,b) {
+        return a - b;
+      });
+
+      var size = bins.length;
+      
+      // TODO: default these to 10th / 90th percentile for numeric data
+      var domain_min = options && options['domain_min'] || time_interval.offset(bins[0], -1);
+      var domain_max = options && options['domain_max'] || time_interval.offset(bins[size-1], 1);
+
+      // size bins to min and max in case the min and max are not based on actual size.
+      var num_bins = bins.filter(function(b) {
+        return b >= domain_min && b <= domain_max;
+      }).length;
+
+      // seems to be right but probably related to font & screen size
+      var label_padding = 18;
+      var rng = time_interval.count(domain_min, domain_max);
+      var tgt_label_cnt =  Math.floor(w / (time_settings[time_incr].label_w + label_padding))
+      var tgt_tick_interval = rng/tgt_label_cnt
+      var ticks_intervals = _.filter(
+        time_settings[time_incr].ticks_intervals, function(d, i) {
+            // must be greater than target length, or max value if none are
+            return d >= tgt_tick_interval || i == time_settings['day'].ticks_intervals.length - 1
+        }
+      );
+
+      var hist = dc.barChart("#" + dim)
+        .width(w).height(h)
+        .elasticY(elasticY)
+        .round(time_interval.round)
+        .alwaysUseRounding(true)
+        .margins({top: 10, right: 20, bottom: 20, left: 40})
+        .filter(filter)
+        .x(d3.time.scale().domain([domain_min, domain_max]))
+        .xUnits(function(start, end) { return time_interval.count(start, end) } )
+        .dimension(dims[dim])
+        .group(grouper)
+        .renderHorizontalGridLines(true)
+        .valueAccessor(valueAccessor)
+        .filterPrinter(filterPrinter)
+      ;
+
+      hist.yAxis().tickFormat(yAxisFormatter)
+      hist.xAxis()
+        .tickFormat(d3.time.format(time_settings[time_incr].format))
+        // use lowest tick interval greater than target:
+        .ticks(time_interval, ticks_intervals[0])
+
+      return hist
+
+    };
+
+    function make_hist_chart(dim, options, dims, groups, ndx) {
+
+      var defaultFilterPrinter = function(filters) {
+        var filter = filters[0], s='';
+
+        s += (xFormatter(filter[0]) + ' -> ' + xFormatter(filter[1]));
+        return s;
+      }
+
+      var defaultValueAccessor = function(d) {
+
+        return d.value
+      };
+
+      var group = options && options['group'] || dim + 's';
+      var xFormatter = options && options['xFormatter'] || function(n) { return formatNumber(parseInt(n))};
+      var yAxisFormatter = options && options['yAxisFormatter'] || formatNumber;
+      var filterPrinter = options && options['filterPrinter'] || defaultFilterPrinter;
+      var valueAccessor = options && options['valueAccessor'] || defaultValueAccessor;
+      var w = options && options['w'] || 350;
+      var h = options && options['h'] || 150;
+      var rounder = options && options['rounder'] || dc.round.ceil;
+      var grouper = options && options['grouper'] || groups[group];
+      var elasticY = options && options['elasticY'] || true;
+      var elasticX = options && options['elasticX'] || false;
+      var filter = options && options['filter'] || null;
+
+      var bins = groups[group].top(Infinity).map(function(item) {
+        return item.key;
+      }).sort(function(a,b) {
+        return a - b;
+      });
+
+      var size = bins.length;
+      
+      // TODO: default these to 10th / 90th percentile for numeric data
+      var domain_min = options && options['domain_min'] || bins[0];
+      var domain_max = options && options['domain_max'] || bins[size-1];
+      // size bins to min and max in case the min and max are not based on actual size.
+      var num_bins = bins.filter(function(b) {
+        return b >= domain_min && b <= domain_max;
+      }).length;
+
+      var hist = dc.barChart("#" + dim)
+        .width(w).height(h)
+        .elasticY(elasticY)
+        .elasticX(elasticX)
+        .xAxisPadding(10)
+        .round(rounder)
+        .margins({top: 10, right: 10, bottom: 20, left: 40})
+        .xUnits(function() { return num_bins })
+        .renderHorizontalGridLines(true)
+        .filter(filter)
+        .x(d3.scale.linear()
+          .domain([
+            domain_min,
+            domain_max
+          ])
+        )
+        .dimension(dims[dim])
+        .group(grouper)
+        .valueAccessor(valueAccessor)
+        .filterPrinter(filterPrinter)
+      ;
+
+      hist.yAxis().tickFormat(yAxisFormatter)
+      hist.xAxis().tickFormat(xFormatter)
+
+      var make_number_display = function(stat, numer, denom) {
+        
+        $('#' + dim).find(".nd-container")
+          .append(
+            $('<div></div>')
+              .css({
+                "margin-right": "20px",
+                "display": "block"
+              })
+              .text(stat + ": ")
+              .append($("<span></span>")
+                .attr("id", "nd" + stat + "-" + dim)
+              )
+          )
+
+        var numer = options["numer"];
+        var denom = options["denom"]
+
+        var percentile_grouper = function(g) {
+
+            return g.reduce(
+              reduceAddPercentileNonNull(dim),
+              reduceRemovePercentileNonNull(dim),
+              reduceInitPercentileNonNull
+            )
+
         }
 
-        var start = lap();
+        var groupers = {
+          "Avg": function() {
 
-        $(element)
+                if (numer && denom) {
+
+                  return function(g) {
+                    return g.reduce(
+                      // TODO: what is this?
+                      reduceAddAvgRatio(numer, denom),
+                      reduceRemoveAvgRatio(numer, denom),
+                      reduceInitAvgRatio
+                    )
+                  }
+                } else {
+
+                  return function(g) {
+                    
+                    var result = g.reduce(
+                      reduceAddAvgNulls(dim),
+                      reduceRemoveAvgNulls(dim),
+                      reduceInitAvgNulls
+                    )
+
+                    return result
+                  }
+                }
+              }(),
+          "p20": percentile_grouper,
+          "p50": percentile_grouper,
+          "p80": percentile_grouper,
+          "Sum": function(g) { return g.reduceSum(function(d) { return d[dim] }) }
+        }
+
+
+        var accessors = {
+          "Avg": function() {
+                if (numer && denom) {
+                  return average_ratio_accessor;
+                } else {
+                  return avgNullsAccessor;
+                }
+              }(),
+          "Sum": function(d) { return d },
+          "p20": function(d) { return percentileAccessor(d, 0.2) },
+          "p50": function(d) { return percentileAccessor(d, 0.5) },
+          "p80": function(d) { return percentileAccessor(d, 0.8) }
+        }
+
+        var ndGrouper = groupers[stat];
+        var ndAccessor = accessors[stat];
+        var nd = dc.numberDisplay("#nd" + stat + "-" + dim)
+          // use dim_formatter dims_to_included or the default
+          // TODO: should this format be dynamic or always prec1?
+          .formatNumber(function(d) {
+            if (typeof options['xFormatter'] != 'undefined') {
+              return options['xFormatter'](d)
+            } else {
+              return formatNumberPrec1(d)  
+            }                    
+         })
+          .group(ndGrouper(ndx.groupAll()))
+          .valueAccessor(ndAccessor)
+      };
+
+      var annotations = options['annotations'] || ["Avg", "p20", "p50", "p80"];
+
+      annotations.forEach(function(item) {
+        make_number_display(item);
+      })
+
+      return hist
+
+    };
+
+    var create_container = function(meta_lookup, total_meta_lookup) {
+      var meta_pks = meta_lookup.primary_keys;
+      var meta_dims = meta_lookup.dimensions;
+      var element = $('body');
+      element.html("");
+
+      $(element)
             .append(
               $("<header></header>")
                 .attr("id", "title-block")
@@ -831,7 +1110,6 @@
                   $("<h1></h1>").css("float", "left")
                     .append($("<span></span>").addClass("logo-blue").text("quick"))
                     .append($("<span></span>").text("filter"))
-
                 )
             )
             .append(
@@ -1111,9 +1389,19 @@
               })
 
 
-              var payload = selected_fieldnames_to_payload(selected_dim_names, selected_pk_names, data);
+              var payload = selected_fieldnames_to_payload(data, selected_dim_names, selected_pk_names);
               console_time('create_all_on_dim_ctrl_submit')
-              create_all(payload, data)
+
+              // TODO: this is repeated; may not need to load data again
+              d3.json(fnm_path + data_fnm, function(err, results) {
+          
+                if (err) {
+                  console.log(err)
+                }
+                
+                create_all(results, payload, data)
+
+              })
               console_time_end('create_all_on_dim_ctrl_submit')
 
             })
@@ -1140,880 +1428,546 @@
               }
 
             })
-
-            //
-            var top_filter = collected_params['top_filter'];
-            if ( typeof top_filter != 'undefined' ) {
-              top_filter = JSON.parse(unescape(top_filter))
-            }
-            // use top grep to remove rows
-            // currently only takes case insensitive match
-            if (typeof top_filter != 'undefined') {
-              var clean_results = [];
-              results.data.forEach(function(el) {
-                $.each(top_filter, function(j, match) {
-                  var val = el[j];
-                  // var val = el[j].value;
-                  if (typeof val != 'string' || val.toLowerCase().indexOf(match.toLowerCase()) != -1 ) {
-                    clean_results.push(el)
-                  }
-                })
-              })
-              results.data = clean_results
-            }
-
-            // <-- BEGIN parse and clean dataset -->
-            // this cleans some things but also only keeps the selected columns
-            // since the others don't need to be included in the crossfilter ndx
-            // TODO: delete the rest of the data from memory after?
-            var rows = [];
-            console_time('cleaned_data')
-            results.data.forEach(function(el) {
-              var row = {};
-              $.each(el, function(k, item) {
-                var k_clean = k.replace('.', '_');
-                if (
-                  k_clean in _.extend(meta_dims, meta_pks)
-                  || _.pluck(meta_dims, 'date_source').indexOf(k_clean) != -1
-                  || _.pluck(meta_dims, 'number_bin_source').indexOf(k_clean) != -1
-                ) {
-                  row[k_clean] = item
-                  // row[k_clean] = item.value
-                }
-              })
-              rows.push(row);
-            })
-            window.rows = rows
-            // <-- BEGIN parse and clean dataset -->
-            console_time_end('cleaned_data')
-
-            var dim_formats;
-            if (typeof collected_params.dim_formats !== 'undefined') {
-              dim_formats = JSON.parse(unescape(collected_params.dim_formats));
-            } else {
-              dim_formats = {};
-            }
-            
-            var dims_to_convert_to_log = [];
-            if (typeof collected_params.log_columns !== 'undefined') {
-
-              log_columns = JSON.parse(unescape(collected_params.log_columns));
-              log_columns.forEach(function(c) {
-                dims_to_convert_to_log.push(c) 
-              })
-            };
-
-            if (dims_to_convert_to_log.length > 0) {
-              convert_to_log(rows, dims_to_convert_to_log, meta_dims);
-            }
-
-            // TODO: might have to add underlying numbers of number_bin columns
-            // hacky set
-            var date_cols = {};
-            $.each(meta_dims, function(k,v) {
-              if (v.type == 'date') {
-                if (v.date_source) {
-                  // if derived date, add sources
-                  date_cols[v.date_source] = 1  
-                } else {
-                  // if not derived date, add key
-                  date_cols[k] = 1
-                }                  
-              }
-            });
-
-            date_cols = _.keys(date_cols);
-
-            console_time('derived_date_and_bin_array')
-            // TODO: derived date dimensions should also be added to `rows` or they
-            // won't show up in the DataTable, Parallel Coords & Scatterplot
-            rows.forEach(function(r, i) {
-
-              r['_id'] = i.toString()
-              // parse date columns
-              date_cols.forEach(function(dc) {
-                // TODO: auto format or take parsers
-                var date_parser = date_dim_parsers[dc] || time_settings.day.format
-                var year_offset = date_dim_offsets[dc] || 0
-
-                r[dc] = d3.timeYear.offset(d3.time.format(date_parser).parse(r[dc]), year_offset)
-              })
-
-              $.each(number_dim_bin_arrays, function(k,v) {
-                var number_dim_bin_subtype = k + '_' + 'bins';
-                // var number_bin_source = meta_dims[k].number_bin_source;
-                // var number_dim_bin_array = number_dim_bin_arrays[number_bin_source];
-                // check valididty of bins_array; if invalid, warn and default to string respresentation
-                // TODO: should this happen later in the binner function? or even earlier than here?
-                // is valid if:
-                // 1. monotonically increasing
-                if (!isMonotone(v)) { 
-                  console.warn("Bins array must be monotonically increasing.")
-                  r[number_dim_bin_subtype] = r[k].toString()
-                } else {
-                  // here we create the derived number bin dimension using source column, bins and binner
-                  r[number_dim_bin_subtype] = number_binner(r[k], v)
-                }
-
-
-              })
-
-            });
-            console_time_end('derived_date_and_bin_array')
-
-            console_time('add_derived_columns')
-            var derived_columns;
-            if (typeof collected_params.derived_columns !== 'undefined') {
-              derived_columns = JSON.parse(unescape(collected_params.derived_columns));
-              add_derived_columns(rows, derived_columns, meta_dims);
-            };
-            console_time_end('add_derived_columns')
-
-            // var nullifzero_columns;
-            // if (typeof collected_params.nullifzero_columns !== 'undefined') {
-
-              // nullifzero_columns = JSON.parse(unescape(collected_params.nullifzero_columns));
-            // };
-            // convert_to_nullifzero(rows, dims_to_convert_to_log)
-            
-            console_time('create_ndx')
-            var ndx = crossfilter(rows);
-            window.ndx = ndx;
-            console_time_end('create_ndx')
-
-            var all = ndx.groupAll();
-
-            var dims = {};
-            window.dims = dims;
-            var groups = {};
-
-            var get_rounder = function(r_factor) {
-
-              return function(d) { return Math.round(d / r_factor) * r_factor }
-
-            };
-          
-            var r_factor, rounder;
-
-            var manual_bins, manual_bins_dim;
-            var manual_bins_raw = collected_params.manual_bins;
-            if (typeof manual_bins_raw != 'undefined') {
-              manual_bins = JSON.parse(unescape(manual_bins_raw));
-            }
-          
-            $.each(_.extend(meta_dims, meta_pks), function(k, v) {
-
-              // if a derived date dimension, use the source dimension
-              if (meta_dims[k].type == 'date' && meta_dims[k].date_source ) {
-
-                var interval = time_settings[meta_dims[k].time_incr].interval;
-                // here we map date column to truncated date based on interval
-
-                // ... if is a `time_of_day` type metric, we collapse into the 'of x' unit
-                var interval_collapse = time_settings[meta_dims[k].time_incr].interval_collapse;              
-                if (typeof interval_collapse != 'undefined') {
-                  dims[k] = ndx.dimension(function(d) {
-                    return interval(
-                      d3.timeMillisecond.offset(
-                          // arbitrarily anchor off of Jan 1 of current year:
-                          d3.timeYear(),
-                          // collapse happens here:
-                          // the delta between the time and the beginning of the time period is added
-                          // as offset against the above anchor date
-                          d[meta_dims[k].date_source] - interval_collapse(d[meta_dims[k].date_source])
-                        )
-                      )
-                  })
-                } else {
-                  dims[k] = ndx.dimension(function(d) { return interval(d[meta_dims[k].date_source]) })
-                }
-
-              } else {
-                dims[k] = ndx.dimension(function(d) { return d[k]; });
-              }
-
-              manual_bins_dim = typeof manual_bins == 'undefined' ? undefined : manual_bins[k]
-              if (typeof manual_bins_dim != 'undefined') {
-                r_factor = +manual_bins_dim
-              } else {
-                r_factor = decide_rounding_by_dim(dims, k);  
-              }
-              rounder = get_rounder(r_factor);
-
-              // if (number_types.indexOf(meta_lookup[k].type) != -1) {
-              if (number_types.indexOf(meta_dims[k].type) != -1) { 
-                groups[k + 's'] = dims[k].group(rounder);
-              } else {
-                groups[k + 's'] = dims[k].group();
-              }
-
-              // add same rounding and precision to meta_lookup for use in chart settings
-              // meta_lookup[k].chart_settings = {
-              meta_dims[k].chart_settings = {
-                xFormatter: get_xformatter(r_factor),
-                rounder: rounder
-              }
-
-              if (meta_dims[k].type == 'date' &&  typeof meta_dims[k].time_incr != 'undefined') {
-                meta_dims[k].chart_settings.time_incr = meta_dims[k].time_incr
-              }
-
-              // override with dim_formatter
-              if (typeof dim_formats[k] != 'undefined' && typeof dim_formatters[dim_formats[k]] != 'undefined') {
-                meta_dims[k].chart_settings.xFormatter = dim_formatters[dim_formats[k]]
-              }
-            })
-
-            window.groups = groups;
-
-            function make_row_chart(dim, options) {
-
-              var default_orderer = function(d) { return -d.value };
-              
-              var num_rows = 5;
-              var group = options && options['group'] || dim + 's';
-              var xFormatter = options && options['xFormatter'] || formatNumberGeneral;
-              var w = options && options['w'] || 350;
-              var h = options && options['h'] || 50 * num_rows;
-              var orderer = options && options['orderer'] || default_orderer;
-
-              rowChart = dc.rowChart("#" + dim)
-                .width(w)
-                .height(h)
-                .dimension(dims[dim])
-                .group(groups[group])
-                .elasticX(true)
-                .rowsCap(num_rows)
-                .valueAccessor(function(d) { return d.value })
-                .ordering(orderer)
-              ;
-              
-              rowChart.xAxis().tickFormat(xFormatter);
-
-              return rowChart;
-
-            };
-
-            function make_pie_chart(dim, options) {
-
-              var group = options && options['group'] || dim + 's';
-
-              var pie = dc.pieChart("#" + dim)
-                .radius(75)
-                .innerRadius(10)
-                .height(150).width(250)
-                .dimension(dims[dim])
-                .group(groups[group])
-                .label(function (d) {
-
-                      // if (pie.hasFilter() && ! pie.hasFilter(d.data.key)) {
-                      if (pie.hasFilter() && ! pie.hasFilter(d.key)) {
-                          // return d.data.key + ' 0%';
-                          return d.key + ' 0%';
-                      }
-                      // var label = d.data.key;
-                      var label = d.key;
-                      if (all.value()) {
-                          label += ' ' + Math.floor(d.value / all.value() * 100) + '%';
-                      }
-                      return label;
-                  })
-                ;
-
-              return pie;
-
-            };
-
-            function make_hist_chart_date(dim, options) {
-
-
-              var defaultFilterPrinter = function(filters, tick_format) {
-              
-                  var filter = filters[0], s='';
-                  s += (tick_format(filter[0]) + ' -> ' + tick_format(filter[1]));
-                  return s;
-              }
-
-              var defaultValueAccessor = function(d) {
-
-                return d.value
-              };
-
-              var group = options && options['group'] || dim + 's';
-              var xFormatter = options && options['xFormatter'] || function(n) { return formatNumber(parseInt(n))};
-              var yAxisFormatter = options && options['yAxisFormatter'] || formatNumber;
-              var valueAccessor = options && options['valueAccessor'] || defaultValueAccessor;
-              var w = options && options['w'] || 350;
-              var h = options && options['h'] || 150;
-              var rounder = options && options['rounder'] || dc.round.ceil;
-              var grouper = options && options['grouper'] || groups[group];
-              var elasticY = options && options['elasticY'] || true;
-              var elasticX = options && options['elasticX'] || false;
-              var filter = options && options['filter'] || null;
-              var time_incr = options && options['time_incr'] || 'day'
-              
-              var tick_format = d3.time.format(time_settings[time_incr].format)
-              var filterPrinter = options && options['filterPrinter'] || function(f) { return defaultFilterPrinter(f, tick_format) };
-
-              var time_interval = time_settings[time_incr].interval;
-              var time_interval_parent = time_settings[time_incr].interval_parent
-
-              var bins = groups[group].top(Infinity).map(function(item) {
-                return item.key;
-              }).sort(function(a,b) {
-                return a - b;
-              });
-
-              var size = bins.length;
-              
-              // TODO: default these to 10th / 90th percentile for numeric data
-              var domain_min = options && options['domain_min'] || time_interval.offset(bins[0], -1);
-              var domain_max = options && options['domain_max'] || time_interval.offset(bins[size-1], 1);
-
-              // size bins to min and max in case the min and max are not based on actual size.
-              var num_bins = bins.filter(function(b) {
-                return b >= domain_min && b <= domain_max;
-              }).length;
-
-              // seems to be right but probably related to font & screen size
-              var label_padding = 18;
-              var rng = time_interval.count(domain_min, domain_max);
-              var tgt_label_cnt =  Math.floor(w / (time_settings[time_incr].label_w + label_padding))
-              var tgt_tick_interval = rng/tgt_label_cnt
-              var ticks_intervals = _.filter(
-                time_settings[time_incr].ticks_intervals, function(d, i) {
-                    // must be greater than target length, or max value if none are
-                    return d >= tgt_tick_interval || i == time_settings['day'].ticks_intervals.length - 1
-                }
-              );
-
-              var hist = dc.barChart("#" + dim)
-                .width(w).height(h)
-                .elasticY(elasticY)
-                .round(time_interval.round)
-                .alwaysUseRounding(true)
-                .margins({top: 10, right: 20, bottom: 20, left: 40})
-                .filter(filter)
-                .x(d3.time.scale().domain([domain_min, domain_max]))
-                .xUnits(function(start, end) { return time_interval.count(start, end) } )
-                .dimension(dims[dim])
-                .group(grouper)
-                .renderHorizontalGridLines(true)
-                .valueAccessor(valueAccessor)
-                .filterPrinter(filterPrinter)
-              ;
-
-              hist.yAxis().tickFormat(yAxisFormatter)
-              hist.xAxis()
-                .tickFormat(d3.time.format(time_settings[time_incr].format))
-                // use lowest tick interval greater than target:
-                .ticks(time_interval, ticks_intervals[0])
-
-              return hist
-
-            };
-
-            function make_hist_chart(dim, options) {
-
-              var defaultFilterPrinter = function(filters) {
-                var filter = filters[0], s='';
-
-                // s += (genericPrecisionSniff(filter[0]) + ' -> ' + genericPrecisionSniff(filter[1]));
-                s += (xFormatter(filter[0]) + ' -> ' + xFormatter(filter[1]));
-                return s;
-              }
-
-              var defaultValueAccessor = function(d) {
-
-                return d.value
-              };
-
-              var group = options && options['group'] || dim + 's';
-              var xFormatter = options && options['xFormatter'] || function(n) { return formatNumber(parseInt(n))};
-              var yAxisFormatter = options && options['yAxisFormatter'] || formatNumber;
-              var filterPrinter = options && options['filterPrinter'] || defaultFilterPrinter;
-              var valueAccessor = options && options['valueAccessor'] || defaultValueAccessor;
-              var w = options && options['w'] || 350;
-              var h = options && options['h'] || 150;
-              var rounder = options && options['rounder'] || dc.round.ceil;
-              var grouper = options && options['grouper'] || groups[group];
-              var elasticY = options && options['elasticY'] || true;
-              var elasticX = options && options['elasticX'] || false;
-              var filter = options && options['filter'] || null;
-
-              var bins = groups[group].top(Infinity).map(function(item) {
-                return item.key;
-              }).sort(function(a,b) {
-                return a - b;
-              });
-
-              var size = bins.length;
-              
-              // TODO: default these to 10th / 90th percentile for numeric data
-              var domain_min = options && options['domain_min'] || bins[0];
-              var domain_max = options && options['domain_max'] || bins[size-1];
-              // size bins to min and max in case the min and max are not based on actual size.
-              var num_bins = bins.filter(function(b) {
-                return b >= domain_min && b <= domain_max;
-              }).length;
-
-              var hist = dc.barChart("#" + dim)
-                .width(w).height(h)
-                .elasticY(elasticY)
-                .elasticX(elasticX)
-                .xAxisPadding(10)
-                .round(rounder)
-                .margins({top: 10, right: 10, bottom: 20, left: 40})
-                .xUnits(function() { return num_bins })
-                .renderHorizontalGridLines(true)
-                .filter(filter)
-                .x(d3.scale.linear()
-                  .domain([
-                    domain_min,
-                    domain_max
-                  ])
-                )
-                .dimension(dims[dim])
-                .group(grouper)
-                .valueAccessor(valueAccessor)
-                .filterPrinter(filterPrinter)
-              ;
-
-              hist.yAxis().tickFormat(yAxisFormatter)
-              hist.xAxis().tickFormat(xFormatter)
-
-              var make_number_display = function(stat, numer, denom) {
-                
-                $('#' + dim).find(".nd-container")
-                  .append(
-                    $('<div></div>')
-                      .css({
-                        "margin-right": "20px",
-                        "display": "block"
-                      })
-                      .text(stat + ": ")
-                      .append($("<span></span>")
-                        .attr("id", "nd" + stat + "-" + dim)
-                      )
-                  )
-
-                var numer = options["numer"];
-                var denom = options["denom"]
-
-                var percentile_grouper = function(g) {
-
-                    return g.reduce(
-                      reduceAddPercentileNonNull(dim),
-                      reduceRemovePercentileNonNull(dim),
-                      reduceInitPercentileNonNull
-                    )
-
-                }
-
-                var groupers = {
-                  "Avg": function() {
-
-                        if (numer && denom) {
-
-                          return function(g) {
-                            return g.reduce(
-                              // TODO: what is this?
-                              reduceAddAvgRatio(numer, denom),
-                              reduceRemoveAvgRatio(numer, denom),
-                              reduceInitAvgRatio
-                            )
-                          }
-                        } else {
-
-                          return function(g) {
-                            
-                            var result = g.reduce(
-                              reduceAddAvgNulls(dim),
-                              reduceRemoveAvgNulls(dim),
-                              reduceInitAvgNulls
-                            )
-
-                            return result
-                          }
-                        }
-                      }(),
-                  "p20": percentile_grouper,
-                  "p50": percentile_grouper,
-                  "p80": percentile_grouper,
-                  "Sum": function(g) { return g.reduceSum(function(d) { return d[dim] }) }
-                }
-
-
-                var accessors = {
-                  "Avg": function() {
-                        if (numer && denom) {
-                          return average_ratio_accessor;
-                        } else {
-                          return avgNullsAccessor;
-                        }
-                      }(),
-                  "Sum": function(d) { return d },
-                  "p20": function(d) { return percentileAccessor(d, 0.2) },
-                  "p50": function(d) { return percentileAccessor(d, 0.5) },
-                  "p80": function(d) { return percentileAccessor(d, 0.8) }
-                }
-
-                var ndGrouper = groupers[stat];
-                var ndAccessor = accessors[stat];
-                var nd = dc.numberDisplay("#nd" + stat + "-" + dim)
-                  // use dim_formatter prodims_to_includeed or the default
-                  // TODO: should this format be dynamic or always prec1?
-                  .formatNumber(function(d) {
-                    if (typeof dim_formats[dim] != 'undefined' && typeof dim_formatters[dim_formats[dim]] != 'undefined') {
-                      return dim_formatters[dim_formats[dim]](d)
-                    } else {
-                      return formatNumberPrec1(d)  
-                    }                    
-                 })
-                  .group(ndGrouper(ndx.groupAll()))
-                  .valueAccessor(ndAccessor)
-              };
-
-              var annotations = options['annotations'] || ["Avg", "p20", "p50", "p80"];
-
-              annotations.forEach(function(item) {
-                make_number_display(item);
-              })
-
-              return hist
-
-            };
-
-            var chart_global_row = $("<div></div>").addClass("chart-row");
-            var ct = 0;
-            var cols_per_row = 3;
-
-            // Runs through meta_dims and makes the chart elements
-            $.each(meta_dims, function(k, v) {
-
-              if (typeof meta_lookup.primary_keys[k] == 'undefined') {
-
-                var chart_col = $("<div></div>").addClass("chart-col");
-
-                var chart_name = v.label_short;
-                if (v.scale == 'log') {
-                  chart_name += ' (log)'
-                }
-                chart_col.append(
-                  annotatedChartElement(k, chart_name)
-                )
-
-                chart_global_row.append(chart_col);
-                if (chart_global_row.children().length % cols_per_row == 0) {
-                  $("#global-rows").append(chart_global_row);
-                  chart_global_row = $("<div></div>").addClass("chart-row");
-                // } else if (ct == meta_lookup.length - 1) {
-                } else if (ct == meta_dims.length - 1) {
-                  $("#global-rows").append(chart_global_row);
-                }
-
-                ct += 1;
-              };
-
-            });
-
-
-            $("#global-rows").append(chart_global_row);
-
-            // Runs through meta_dims AGAIN and makes the charts themselves
-            $.each(meta_dims, function(k, v) {
-              var chart_obj;
-
-              if (number_types.indexOf(v.type) != -1) {
-
-                chart_obj = make_hist_chart(k, v.chart_settings)
-                
-              };
-
-              if (v.type == 'date') {
-                chart_obj = make_hist_chart_date(k, v.chart_settings)
-              };
-
-              if (['string', 'yesno'].indexOf(v.type) != -1) {
-                if (groups[k+'s'].size() <= 5) {
-                  chart_obj = make_pie_chart(k);
-                } else {
-                  chart_obj = make_row_chart(k);
-
-                }
-              };
-
-              window[k + 'Chart'] = chart_obj;
-
-              if (dim_filters && typeof dim_filters[k] != 'undefined') {
-                // TODO: check validity; only allow range filter (array with two positive monitone integers)
-                chart_obj.filter(dim_filters[k])
-                dims[k].filter(dim_filters[k])
-              }
-
-            });
-
-            // lap_from_last("pre-datacount")
-
-            dc.dataCount('.data-count')
-              .dimension(ndx)
-              .group(all)
-            ;
-
-            // bind jquery dataTable to dc tables
-            // http://stackoverflow.com/questions/21113513/dcjs-reorder-datatable-by-column
-            // TODO(?): make searching datatable filter the crossfilter & parallelCoords
-
-            // <-- BEGIN datatable -->
-            var primary_key = Object.keys(meta_pks)[0];
-
-            // todo: allow input of primary key
-            if (typeof primary_key != 'undefined') {
-
-              // should be an object, where keys are field names and values are link_prefix
-              // TODO: allow template string, but then you need to specify the variable name
-              // to make the link {"field1": "https://www.google.com/search?q="}
-              var primary_key, link_columns;
-              if (typeof collected_params.link_columns !== 'undefined') {
-
-                link_columns = JSON.parse(unescape(collected_params.link_columns));
-              }
-
-              var columns = [];
-              $.each(meta_dims, function(k, v) {
-
-                if ( typeof v.date_source == 'undefined' ) {
-                  var col = {
-                    data: v.label_short,
-                    title: titleify(v.label_short),
-                    defaultContent: ""
-                  }
-
-                  // for non-pk number types, 
-                  if (number_types.indexOf(v.type) != -1 && typeof meta_lookup.primary_keys[k] == 'undefined') {
-                    col.render = get_xformatter(decide_rounding_by_dim(dims, v.label_short))
-                  }
-                  // override with dim_formatter
-
-                  if (typeof dim_formats[k] != 'undefined' && typeof dim_formatters[dim_formats[k]] != 'undefined') {
-                    col.render = dim_formatters[dim_formats[k]]
-                  }
-
-                  if (v.type == 'date') {
-                    col.render = d3.time.format(date_dim_parsers[v.label_short] || time_settings.day.format)
-                  }
-
-                  if (link_columns && link_columns[v.label_short] ) {
-
-                    col.render = function(d) { return '<a target="_blank" href="' + link_columns[v.label_short] + d + '">' + d + '</a>' };
-                    col.sClass = "linkCol";
-                  }
-
-                  columns.push(col)
-                }
-              });
-
-              var table_size = Infinity
-              ;
-
-              function RefreshTable() {
-
-                dc.events.trigger(function() {
-                  var filtered_data = dims[primary_key].top(table_size);
-                  recordsTable.fnClearTable();
-                  if (filtered_data.length > 0) {
-                    recordsTable.fnAddData(filtered_data);  
-                    recordsTable.fnDraw();
-                    // re-hide table if it was hidden before
-                    if ($("#table-toggler").text() == '(show)') {
-                      $("#data-datatable tr").hide();
-                    }
-                  }
-                });
-              }
-
-              function makeParallelSections() {
-                
-                // creates the parallel coords section (using quick_parallel_coords.make_parallel_coords)
-                // TODO: decouple from datatable
-                // for now data for parallel-coords will be a subset of selected data
-                // where it's a number type
-                var parallel_data = [];
-                // initialize to null
-                var series_key = null;
-                var dims_to_include = {};
-
-                console_time('get_parallel_data')
-                recordsTable.fnGetData().forEach(function(r, i) {
-                  if ( i < 10000 ) {
-                    var out = {};
-                    for (k in r) {
-                      // if (typeof meta_lookup.primary_keys[k] == 'undefined' && total_meta_lookup[k].type == "number" ) {
-                      // TODO: ^ this used to look at total_meta_lookup instead of meta_lookup... is there a reason?
-                      if (
-                        typeof meta_lookup.primary_keys[k] == 'undefined'
-                        && meta_lookup.dimensions[k]
-                        && meta_lookup.dimensions[k].type == "number"
-                      ) {
-                        out[k] = r[k];
-                        var input_order = meta_lookup.dimensions[k].input_order;
-                        dims_to_include[k] = input_order
-
-                      // } else if ( k == series_key || (series_key == null && total_meta_lookup[k].type == "string" && typeof meta_lookup.primary_keys[k] == 'undefined' )) {
-                      // TODO: ^ this used to look at total_meta_lookup instead of meta_lookup... is there a reason?
-                    } else if (
-                        k == series_key
-                        || (
-                          series_key == null
-                          && meta_lookup.dimensions[k]
-                          && meta_lookup.dimensions[k].type == "string"
-                          && typeof meta_lookup.primary_keys[k] == 'undefined'
-                        )
-                    ) {
-
-                        out[k] = r[k]
-                        // if this is the first non-pk string, set it as series key
-                        if ( series_key == null ) {
-                          series_key = k
-                        }
-                      }
-                    }
-                    parallel_data.push(out)
-                  }
-                })
-                console_time_end('get_parallel_data')
-
-                if (typeof collected_params.colors !== 'undefined') {
-                  var colorscheme = []
-                  var hex_colors_from_url = _.map(collected_params["colors"].split(','), function(c) { return '#' + c })
-                  hex_colors_from_url.forEach(function(c, i) {
-                      colorscheme[i] = c
-                  })
-                }
-
-                // hacky set
-                dims_to_include = _.sortBy(_.keys(dims_to_include), function(k) { return dims_to_include[k] })
-                
-                console_time('make_paracoords')
-                make_parallel_coords(
-                  'parallel-coordinates',
-                  parallel_data,
-                  // TODO: put dims in the right order (total_meta_lookup drops order from input)
-                  dims_to_include,
-                  // TODO: prioritize or choose series via UI
-                  series_key || 1,
-                  colorscheme
-                )
-                console_time_end('make_paracoords')
-
-                console_time('make_splom')
-                var max_scatterplot_size = 5;
-                var scatterplot_dims_to_include = dims_to_include.slice(0, max_scatterplot_size)
-
-                // TODO: why is this in MakeParallelCoords function?
-                // TODO: send in dimension format for scales & best fit equations
-                make_scatterplot_matrix(
-                  'scatterplot-matrix',
-                  parallel_data,
-                  scatterplot_dims_to_include,
-                  // series_key || 1,
-                  // TODO: enable series (color coding works as is
-                  // but need to figure out whether they get separate
-                  // best fit lines)
-                  1,
-                  colorscheme
-                )
-                console_time_end('make_splom')
-
-              }
-
-              dc.chartRegistry.list().forEach(function(chart) {
-                chart.on("filtered", function() {
-                  RefreshTable();
-                  makeParallelCoords();
-                })
-              });
-
-              $('#data-table')
-                .html(
-                  $('<table></table>')
-                  .attr("cellpadding", "0")
-                  .attr("cellspacing", "0")
-                  .attr("border", "0")
-                  .addClass("display")
-                  .attr("id", "data-datatable")
-                )
-              ;
-
-              recordsTable = $('#data-datatable').dataTable( {
-                "data": dims[primary_key].top(table_size),
-                "paging": true,
-                "info": true,
-                "order": [[1, "asc"]],
-                "searching": true,
-                "scrollX": true,
-                "columns": columns,
-                // this customizes the positioning of elements:
-                // ... see https://datatables.net/release-datatables/examples/basic_init/dom.html
-                "dom": '<"top"if>rt<"bottom"lp><"clear">'
-              });
-
-              // <-- END make datatable -->
-
-              // <-- BEGIN make parallel_coords -->
-              // // TODO: decouple from datatable
-                // -- actually, might not be needed(?)
-              // // for now data for parallel-coords will be a subset of selected data
-              
-              // TODO: paracoords is slow, only render it when visible (also make it faster)
-              makeParallelSections()
-
-              // <-- END make parallel_coords -->
-
-            } else {
-              $("#data-table").text("No primary_key specified")
-            };
-
-            $(".toggler").on("click", function() { 
-                $(this).parent().siblings().toggle();
-                $(this).toggleText("(show)", "(hide)");
-              });
-
-            $("#records-selected-counter").toggle();
-
-            console_time('renderAll_init')
-            dc.renderAll();
-            console_time_end('renderAll_init')
-            
-            // hide sections that should start hidden
-            $("#dimension-controls-wrapper .toggler").click()
-            $("#data-table-wrapper .toggler").click()
-            // $("#parallel-coordinates-wrapper .toggler").click()
-            // $("#scatterplot-matrix-wrapper .toggler").click()
-
-            lap_from_top()
-
-      })
     }
 
-    var run = function() {
 
-      // metadata
-      $.getJSON(fnm_path + metadata_fnm, function(resp) {
 
-        var total_meta_lookup = {};
+    var create_all = function(results, meta_lookup, total_meta_lookup) {
+
+      window.meta_lookup = meta_lookup
+      window.total_meta_lookup = total_meta_lookup
+      
+      var meta_pks = meta_lookup.primary_keys;
+      var meta_dims = meta_lookup.dimensions;
+
+      // d3.json(fnm_path + data_fnm, function(err, results) {
+          
+      //   if (err) {
+      //     console.log(err)
+      //   }
+        window.results = results
+        create_container(meta_lookup, total_meta_lookup)        
+
+        // <-- BEGIN parse and clean dataset -->
+
+        var top_filter = collected_params['top_filter'];
+        if ( typeof top_filter != 'undefined' ) {
+          top_filter = JSON.parse(unescape(top_filter))
+        }
+        // use top grep to remove rows
+        // currently only takes case insensitive match
+        if (typeof top_filter != 'undefined') {
+          var clean_results = [];
+          results.data.forEach(function(el) {
+            $.each(top_filter, function(j, match) {
+              var val = el[j];
+              // var val = el[j].value;
+              if (typeof val != 'string' || val.toLowerCase().indexOf(match.toLowerCase()) != -1 ) {
+                clean_results.push(el)
+              }
+            })
+          })
+          results.data = clean_results
+        }
+
+        // this cleans some things but also only keeps the selected columns
+        // since the others don't need to be included in the crossfilter ndx
+        // TODO: delete the rest of the data from memory after?
+        var rows = [];
+        console_time('cleaned_data')
+        results.data.forEach(function(el) {
+          var row = {};
+          $.each(el, function(k, item) {
+            var k_clean = k.replace('.', '_');
+            if (
+              k_clean in _.extend(meta_dims, meta_pks)
+              || _.pluck(meta_dims, 'date_source').indexOf(k_clean) != -1
+              || _.pluck(meta_dims, 'number_bin_source').indexOf(k_clean) != -1
+            ) {
+              row[k_clean] = item
+              // row[k_clean] = item.value
+            }
+          })
+          rows.push(row);
+        })
+        // <-- BEGIN parse and clean dataset -->
+        console_time_end('cleaned_data')
+
+        var dim_formats;
+        if (typeof collected_params.dim_formats !== 'undefined') {
+          dim_formats = JSON.parse(unescape(collected_params.dim_formats));
+        } else {
+          dim_formats = {};
+        }
+        
+        var dims_to_convert_to_log = [];
+        if (typeof collected_params.log_columns !== 'undefined') {
+
+          log_columns = JSON.parse(unescape(collected_params.log_columns));
+          log_columns.forEach(function(c) {
+            dims_to_convert_to_log.push(c) 
+          })
+        };
+
+        if (dims_to_convert_to_log.length > 0) {
+          convert_to_log(rows, dims_to_convert_to_log, meta_dims);
+        }
+
+        // TODO: might have to add underlying numbers of number_bin columns
+        // hacky set
+        var date_cols = {};
+        $.each(meta_dims, function(k,v) {
+          if (v.type == 'date') {
+            if (v.date_source) {
+              // if derived date, add sources
+              date_cols[v.date_source] = 1  
+            } else {
+              // if not derived date, add key
+              date_cols[k] = 1
+            }                  
+          }
+        });
+
+        date_cols = _.keys(date_cols);
+
+        console_time('derived_date_and_bin_array')
+        // TODO: derived date dimensions should also be added to `rows` or they
+        // won't show up in the DataTable, Parallel Coords & Scatterplot
+        rows.forEach(function(r, i) {
+
+          // TODO: make sure this can't collide with an existing key
+          // (e.g. warn if `_id` in dataset, that it is a reserved keyname)
+          r['_id'] = i.toString()
+          // parse date columns
+          date_cols.forEach(function(dc) {
+            // TODO: auto format or take parsers
+            var date_parser = date_dim_parsers[dc] || time_settings.day.format
+            var year_offset = date_dim_offsets[dc] || 0
+
+            r[dc] = d3.timeYear.offset(d3.time.format(date_parser).parse(r[dc]), year_offset)
+          })
+
+          $.each(number_dim_bin_arrays, function(k,v) {
+            var number_dim_bin_subtype = k + '_' + 'bins';
+            // var number_bin_source = meta_dims[k].number_bin_source;
+            // var number_dim_bin_array = number_dim_bin_arrays[number_bin_source];
+            // check valididty of bins_array; if invalid, warn and default to string respresentation
+            // TODO: should this happen later in the binner function? or even earlier than here?
+            // is valid if:
+            // 1. monotonically increasing
+            if (!isMonotone(v)) { 
+              console.warn("Bins array must be monotonically increasing.")
+              r[number_dim_bin_subtype] = r[k].toString()
+            } else {
+              // here we create the derived number bin dimension using source column, bins and binner
+              r[number_dim_bin_subtype] = number_binner(r[k], v)
+            }
+
+
+          })
+
+        });
+        console_time_end('derived_date_and_bin_array')
+
+        console_time('add_derived_columns')
+        var derived_columns;
+        if (typeof collected_params.derived_columns !== 'undefined') {
+          derived_columns = JSON.parse(unescape(collected_params.derived_columns));
+          add_derived_columns(rows, derived_columns, meta_dims);
+        };
+        console_time_end('add_derived_columns')
+       
+        console_time('create_ndx')
+        var ndx = crossfilter(rows);
+
+        console_time_end('create_ndx')
+
+        var all = ndx.groupAll();
+
+        var dims = {};
+        var groups = {};
+
+        var get_rounder = function(r_factor) {
+
+          return function(d) { return Math.round(d / r_factor) * r_factor }
+
+        };
+      
+        var r_factor, rounder;
+
+        var manual_bins, manual_bins_dim;
+        var manual_bins_raw = collected_params.manual_bins;
+        if (typeof manual_bins_raw != 'undefined') {
+          manual_bins = JSON.parse(unescape(manual_bins_raw));
+        }
+      
+        console_time('add_derived_dates and grouping')
+        $.each(_.extend(meta_dims, meta_pks), function(k, v) {
+
+          // if a derived date dimension, use the source dimension
+          if (meta_dims[k].type == 'date' && meta_dims[k].date_source ) {
+            console.log(meta_dims[k])
+            var interval = time_settings[meta_dims[k].time_incr].interval;
+            // here we map date column to truncated date based on interval
+
+            // ... if is a `time_of_day` type metric, we collapse into the 'of x' unit
+            var interval_collapse = time_settings[meta_dims[k].time_incr].interval_collapse;              
+            if (typeof interval_collapse != 'undefined') {
+              dims[k] = ndx.dimension(function(d) {
+                return interval(
+                  d3.timeMillisecond.offset(
+                      // arbitrarily anchor off of Jan 1 of current year:
+                      d3.timeYear(),
+                      // collapse happens here:
+                      // the delta between the time and the beginning of the time period is added
+                      // as offset against the above anchor date
+                      d[meta_dims[k].date_source] - interval_collapse(d[meta_dims[k].date_source])
+                    )
+                  )
+              })
+            } else {
+              dims[k] = ndx.dimension(function(d) { return interval(d[meta_dims[k].date_source]) })
+            }
+
+          } else {
+            dims[k] = ndx.dimension(function(d) { return d[k]; });
+          }
+
+          // add group, using provided bins or data in dim
+          manual_bins_dim = typeof manual_bins == 'undefined' ? undefined : manual_bins[k]
+          if (typeof manual_bins_dim != 'undefined') {
+            r_factor = +manual_bins_dim
+          } else {
+            r_factor = decide_rounding_by_dim(dims, k);
+          }
+          rounder = get_rounder(r_factor);
+
+          if (number_types.indexOf(meta_dims[k].type) != -1) { 
+            groups[k + 's'] = dims[k].group(rounder);
+          } else {
+            groups[k + 's'] = dims[k].group();
+          }
+
+          // add same rounding and precision to meta_lookup for use in chart settings
+          meta_dims[k].chart_settings = {
+            xFormatter: get_xformatter(r_factor),
+            rounder: rounder
+          }
+
+          if (meta_dims[k].type == 'date' &&  typeof meta_dims[k].time_incr != 'undefined') {
+            meta_dims[k].chart_settings.time_incr = meta_dims[k].time_incr
+          }
+
+          // override with dim_formatter
+          if (typeof dim_formats[k] != 'undefined' && typeof dim_formatters[dim_formats[k]] != 'undefined') {
+            meta_dims[k].chart_settings.xFormatter = dim_formatters[dim_formats[k]]
+          }
+        })
+        console_time_end('add_derived_dates and grouping')
+
+        var chart_global_row = $("<div></div>").addClass("chart-row");
+        var ct = 0;
+        var cols_per_row = 3;
+
+        console_time("make_chart_els")
+        // Runs through meta_dims and makes the chart elements
+        $.each(meta_dims, function(k, v) {
+
+          if (typeof meta_lookup.primary_keys[k] == 'undefined') {
+
+            var chart_col = $("<div></div>").addClass("chart-col");
+
+            var chart_name = v.label_short;
+            if (v.scale == 'log') {
+              chart_name += ' (log)'
+            }
+            chart_col.append(
+              annotatedChartElement(k, chart_name)
+            )
+
+            chart_global_row.append(chart_col);
+            if (chart_global_row.children().length % cols_per_row == 0) {
+              $("#global-rows").append(chart_global_row);
+              chart_global_row = $("<div></div>").addClass("chart-row");
+            // } else if (ct == meta_lookup.length - 1) {
+            } else if (ct == meta_dims.length - 1) {
+              $("#global-rows").append(chart_global_row);
+            }
+
+            ct += 1;
+          };
+
+        });
+        console_time_end("make_chart_els")
+
+        $("#global-rows").append(chart_global_row);
+
+        console_time("make_charts")
+        // Runs through meta_dims AGAIN and makes the charts themselves
+        $.each(meta_dims, function(k, v) {
+          var chart_obj;
+
+          if (number_types.indexOf(v.type) != -1) {
+
+            chart_obj = make_hist_chart(k, v.chart_settings, dims, groups, ndx)
+            
+          };
+
+          if (v.type == 'date') {
+            chart_obj = make_hist_chart_date(k, v.chart_settings, dims, groups)
+          };
+
+          if (['string', 'yesno'].indexOf(v.type) != -1) {
+            if (groups[k+'s'].size() <= 5) {
+              chart_obj = make_pie_chart(k, {}, dims, groups, all);
+            } else {
+              chart_obj = make_row_chart(k, {}, dims, groups, all);
+
+            }
+          };
+
+          window[k + 'Chart'] = chart_obj;
+
+          if (dim_filters && typeof dim_filters[k] != 'undefined') {
+            // TODO: check validity; only allow range filter (array with two positive monitone integers)
+            chart_obj.filter(dim_filters[k])
+            dims[k].filter(dim_filters[k])
+          }
+
+        });
+        console_time_end("make_charts")
+
+        dc.dataCount('.data-count')
+          .dimension(ndx)
+          .group(all)
+        ;
+
+        // bind jquery dataTable to dc tables
+        // http://stackoverflow.com/questions/21113513/dcjs-reorder-datatable-by-column
+        // TODO(?): make searching datatable filter the crossfilter & parallelCoords
+
+        // <-- BEGIN datatable -->
+        // selects arbitrary primary key -- TODO: allow choice including randomly
+        var primary_key = Object.keys(meta_pks)[0];
+
+          // should be an object, where keys are field names and values are link_prefix
+          // TODO: allow template string, but then you need to specify the variable name
+          // to make the link {"field1": "https://www.google.com/search?q="}
+          var primary_key, link_columns;
+          if (typeof collected_params.link_columns !== 'undefined') {
+
+            link_columns = JSON.parse(unescape(collected_params.link_columns));
+          }
+
+          var columns = [];
+          $.each(meta_dims, function(k, v) {
+
+            if ( typeof v.date_source == 'undefined' ) {
+              var col = {
+                data: v.label_short,
+                title: titleify(v.label_short),
+                defaultContent: ""
+              }
+
+              // for non-pk number types, 
+              if (number_types.indexOf(v.type) != -1 && typeof meta_lookup.primary_keys[k] == 'undefined') {
+                col.render = get_xformatter(decide_rounding_by_dim(dims, v.label_short))
+              }
+              // override with dim_formatter
+
+              if (typeof dim_formats[k] != 'undefined' && typeof dim_formatters[dim_formats[k]] != 'undefined') {
+                col.render = dim_formatters[dim_formats[k]]
+              }
+
+              if (v.type == 'date') {
+                col.render = d3.time.format(date_dim_parsers[v.label_short] || time_settings.day.format)
+              }
+
+              if (link_columns && link_columns[v.label_short] ) {
+
+                col.render = function(d) { return '<a target="_blank" href="' + link_columns[v.label_short] + d + '">' + d + '</a>' };
+                col.sClass = "linkCol";
+              }
+
+              columns.push(col)
+            }
+          });
+
+          var max_table_size = 10000
+          ;
+
+          function makeParallelSections() {
+            
+            // creates the parallel coords section (using quick_parallel_coords.make_parallel_coords)
+            // TODO: decouple from datatable
+            // for now data for parallel-coords will be a subset of selected data
+            // where it's a number type
+            var parallel_data = [];
+            // initialize to null
+            var series_key = null;
+            var dims_to_include = {};
+
+            console_time('get_parallel_data')
+            recordsTable.fnGetData().forEach(function(r, i) {
+              if ( i < 10000 ) {
+                var out = {};
+                for (k in r) {
+                  // if (typeof meta_lookup.primary_keys[k] == 'undefined' && total_meta_lookup[k].type == "number" ) {
+                  // TODO: ^ this used to look at total_meta_lookup instead of meta_lookup... is there a reason?
+                  if (
+                    typeof meta_lookup.primary_keys[k] == 'undefined'
+                    && meta_lookup.dimensions[k]
+                    && meta_lookup.dimensions[k].type == "number"
+                  ) {
+                    out[k] = r[k];
+                    var input_order = meta_lookup.dimensions[k].input_order;
+                    dims_to_include[k] = input_order
+
+                  // } else if ( k == series_key || (series_key == null && total_meta_lookup[k].type == "string" && typeof meta_lookup.primary_keys[k] == 'undefined' )) {
+                  // TODO: ^ this used to look at total_meta_lookup instead of meta_lookup... is there a reason?
+                } else if (
+                    k == series_key
+                    || (
+                      series_key == null
+                      && meta_lookup.dimensions[k]
+                      && meta_lookup.dimensions[k].type == "string"
+                      && typeof meta_lookup.primary_keys[k] == 'undefined'
+                    )
+                ) {
+
+                    out[k] = r[k]
+                    // if this is the first non-pk string, set it as series key
+                    if ( series_key == null ) {
+                      series_key = k
+                    }
+                  }
+                }
+                parallel_data.push(out)
+              }
+            })
+            console_time_end('get_parallel_data')
+
+            if (typeof collected_params.colors !== 'undefined') {
+              var colorscheme = []
+              var hex_colors_from_url = _.map(collected_params["colors"].split(','), function(c) { return '#' + c })
+              hex_colors_from_url.forEach(function(c, i) {
+                  colorscheme[i] = c
+              })
+            }
+
+            // hacky set
+            dims_to_include = _.sortBy(_.keys(dims_to_include), function(k) { return dims_to_include[k] })
+            
+            console_time('make_paracoords')
+            make_parallel_coords(
+              'parallel-coordinates',
+              parallel_data,
+              // TODO: put dims in the right order (total_meta_lookup drops order from input)
+              dims_to_include,
+              // TODO: prioritize or choose series via UI
+              series_key || 1,
+              colorscheme
+            )
+            console_time_end('make_paracoords')
+
+            console_time('make_splom')
+            var max_scatterplot_size = 5;
+            var scatterplot_dims_to_include = dims_to_include.slice(0, max_scatterplot_size)
+
+            // TODO: why is this in MakeParallelCoords function?
+            // TODO: send in dimension format for scales & best fit equations
+            make_scatterplot_matrix(
+              'scatterplot-matrix',
+              parallel_data,
+              scatterplot_dims_to_include,
+              // series_key || 1,
+              // TODO: enable series (color coding works as is
+              // but need to figure out whether they get separate
+              // best fit lines)
+              1,
+              colorscheme
+            )
+            console_time_end('make_splom')
+
+          }
+
+          $('#data-table')
+            .html(
+              $('<table></table>')
+              .attr("cellpadding", "0")
+              .attr("cellspacing", "0")
+              .attr("border", "0")
+              .addClass("display")
+              .attr("id", "data-datatable")
+            )
+          ;
+
+          var recordsTable = $('#data-datatable').dataTable( {
+            "data": dims[primary_key].top(max_table_size),
+            "paging": true,
+            "info": true,
+            "order": [[1, "asc"]],
+            "searching": true,
+            "scrollX": true,
+            "columns": columns,
+            // this customizes the positioning of elements:
+            // ... see https://datatables.net/release-datatables/examples/basic_init/dom.html
+            "dom": '<"top"if>rt<"bottom"lp><"clear">',
+            "oLanguage": {
+              // TODO: click on (sampled) to configure sampling options
+              "sInfo": "Showing _START_ to _END_ of _TOTAL_ entries (sampled)",// text you want show for info section
+            }
+
+          });
+          if (is_local == 1) { window.recordsTable = recordsTable }
+
+          // <-- END make datatable -->
+
+          // <-- BEGIN make parallel_coords -->
+          // // TODO: decouple from datatable
+            // -- actually, might not be needed(?)
+          // // for now data for parallel-coords will be a subset of selected data
+          
+          // TODO: paracoords is slow, only render it when visible (also make it faster)
+          makeParallelSections()
+
+          // <-- END make parallel_coords -->
+
+          dc.chartRegistry.list().forEach(function(chart) {
+            chart.on("filtered", function() {
+              RefreshTable(recordsTable, dims, max_table_size, primary_key);
+              makeParallelSections();
+            })
+          });
+
+        $(".toggler").on("click", function() { 
+            $(this).parent().siblings().toggle();
+            $(this).toggleText("(show)", "(hide)");
+          });
+
+        $("#records-selected-counter").toggle();
+
+        console_time('renderAll_init')
+        dc.renderAll();
+        console_time_end('renderAll_init')
+        
+        // hide sections that should start hidden
+        $("#dimension-controls-wrapper .toggler").click()
+        $("#data-table-wrapper .toggler").click()
+        // $("#parallel-coordinates-wrapper .toggler").click()
+        // $("#scatterplot-matrix-wrapper .toggler").click()
+
+      // })
+    }
+
+    var metadata_to_total_meta_lookup = function(resp) {
+      var total_meta_lookup = {};
         var meta_keys = ['label_short', 'type'];
-        var max_dim_ct = 10;
 
         $.each(
-          _.union(
-            resp.fields.dimensions || [],
-            resp.fields.measures || [],
-            resp.fields.table_calculations || []
-          ),
+          resp.fields.dimensions,
           function(i, item) {
-            // if (i <= max_dim_ct - 1) {
-              var name = item['name'].replace(".", "_");
+              var name = item['label_short'];
               var entry = {};
               meta_keys.forEach(function(k) {
 
@@ -2024,70 +1978,116 @@
 
               })
             }
-          // }
         )
 
-        window.total_meta_lookup = total_meta_lookup;
+      return total_meta_lookup
+    }
 
-        var pks = _.filter(
-          total_meta_lookup
-          , function(item, k) {
-            return primary_key_labels.indexOf(k) != -1 
-          }
-        )
+    var get_meta_and_run = function(total_meta_lookup, results_data) {
+      var max_dim_ct = 10;
+      var pks = _.filter(
+        total_meta_lookup
+        , function(item, k) {
+          return primary_key_labels.indexOf(k) != -1 
+        }
+      )
 
-        var other_dims = _.filter(
-          total_meta_lookup
-          , function(item, k) {
-            return primary_key_labels.indexOf(k) == -1 
-          }
-        )
-    
-        var selected_dim_names;
-        var input_selected_dims = collected_params['selected_dims']
-        if (typeof input_selected_dims == 'undefined') {
-          var selected_dims = other_dims.slice(0, max_dim_ct);
-          selected_dim_names = _.pluck(selected_dims, 'label_short');
+      var other_dims = _.filter(
+        total_meta_lookup
+        , function(item, k) {
+          return primary_key_labels.indexOf(k) == -1 
+        }
+      )
+
+      var selected_dim_names;
+      var input_selected_dims = collected_params['selected_dims']
+      if (typeof input_selected_dims == 'undefined') {
+        var selected_dims = other_dims.slice(0, max_dim_ct);
+        selected_dim_names = _.pluck(selected_dims, 'label_short');
+      } else {
+        selected_dim_names = JSON.parse(unescape(input_selected_dims));
+      }
+
+      var selected_pk_names = _.pluck(pks, 'label_short');
+
+      var input_date_dims = collected_params['date_dims'];
+      if (typeof input_date_dims != 'undefined') {
+        var date_dims = JSON.parse(unescape(input_date_dims));
+        date_dims.forEach(function(d) {
+          total_meta_lookup[d].type = 'date'
+        })
+      }
+
+      var input_date_dims = collected_params['date_dims'];
+      if (typeof input_date_dims != 'undefined') {
+        var date_dims = JSON.parse(unescape(input_date_dims));
+
+        date_dims.forEach(function(d) {
+          total_meta_lookup[d].type = 'date'
+        })
+      }
+
+      var input_dim_types = collected_params['dim_types'];
+      if (typeof input_dim_types != 'undefined') {
+        var dim_types = JSON.parse(unescape(input_dim_types));
+        for (k in dim_types) {
+          // override type in total_meta_lookup
+          total_meta_lookup[k].type = dim_types[k]
+          // type_source in total_meta_lookup is used to stuff collected_params
+          total_meta_lookup[k].type_source = 'url'
+        }
+      }
+
+      var payload = selected_fieldnames_to_payload(total_meta_lookup, selected_dim_names, selected_pk_names);
+
+      console_time('create_all_from_run')
+      create_all(results_data, payload, total_meta_lookup);
+      console_time_end('create_all_from_run')
+
+    }
+
+    var run = function(data_fnm, metadata_fnm) {
+
+      d3.json(fnm_path + data_fnm, function(err, results_data) {
+          
+        if (err) {
+          console.log(err)
+        }
+
+        // TODO: replace with jq-like syntax
+        if (typeof collected_params.json_extract != 'undefined') {
+          results_data = {'data': results_data[collected_params.json_extract]}
+        }
+        // console.log(results_data)
+
+        
+        if (typeof metadata_fnm != 'undefined') {
+          // get metadata if fnm provided
+          $.getJSON(fnm_path + metadata_fnm, function(results_metadata) {
+
+            var total_meta_lookup = metadata_to_total_meta_lookup(results_metadata);
+            console.log(total_meta_lookup)
+            get_meta_and_run(total_meta_lookup, results_data)
+
+          })
         } else {
-          selected_dim_names = JSON.parse(unescape(input_selected_dims));
-        }
-        var selected_pk_names = _.pluck(pks, 'label_short');
-        var input_date_dims = collected_params['date_dims'];
-        if (typeof input_date_dims != 'undefined') {
-          var date_dims = JSON.parse(unescape(input_date_dims));
-          date_dims.forEach(function(d) {
-            total_meta_lookup[d].type = 'date'
-          })
-        }
+            var total_meta_lookup = {}
+            var slice = results_data.data[0]
+            $.each(slice, function(k,v) {
+              total_meta_lookup[k] = {
+                "label_short": k,
+                "type": typeof v
+              }
+            })
+            get_meta_and_run(total_meta_lookup, results_data)
 
-        var input_date_dims = collected_params['date_dims'];
-        if (typeof input_date_dims != 'undefined') {
-          var date_dims = JSON.parse(unescape(input_date_dims));
-
-          date_dims.forEach(function(d) {
-            total_meta_lookup[d].type = 'date'
-          })
         }
-
-        var input_dim_types = collected_params['dim_types'];
-        if (typeof input_dim_types != 'undefined') {
-          var dim_types = JSON.parse(unescape(input_dim_types));
-          for (k in dim_types) {
-            // override type in total_meta_lookup
-            total_meta_lookup[k].type = dim_types[k]
-            // type_source in total_meta_lookup is used to stuff collected_params
-            total_meta_lookup[k].type_source = 'url'
-          }
-        }
-
-        var payload = selected_fieldnames_to_payload(selected_dim_names, selected_pk_names, total_meta_lookup);
-        console_time('create_all_from_run')
-        create_all(payload, total_meta_lookup);
-        console_time_end('create_all_from_run')
 
       })
     
-    }
+    };
+
+    // TODO: finish this (add to url params & refresh on editing data)
 
     function encodeQueryData(data) {
      const ret = [];
@@ -2097,18 +2097,14 @@
     }
 
     function update_url_params(k, v) {
-      // this adds to the url params and REFRESHES THE PAGE
+      // TODO: this adds to the url params and REFRESHES THE PAGE
       // (for now it may refresh state redundantly with other refresh buttons, etc)
       // it takes a key and value
       // if the key is a new url_param, it will add it
       // if the key is an existing url_param, value will be appended to an array or updated
       // into an object
-
-      
-
+      // window.location.origin + window.location.pathname + '?' + encodeQueryData(collected_params)  
     }
-
-    // window.location.origin + window.location.pathname + '?' + encodeQueryData(collected_params)
 
     var collected_params = {};
     window.location.search.replace("?", "").split("&").forEach(function(item) {
@@ -2173,16 +2169,21 @@
     }
     
     default_fnm_path = is_local == 1 ? "../datasets/" : 'http://quickfilter.s3-website-us-east-1.amazonaws.com/datasets/'
+    // prefix will be used for both data_fnm and metadata_fnm
     var fnm_prefix = collected_params.fnm_prefix;
     var fnm_path = collected_params.fnm_path || default_fnm_path;
     if ( typeof fnm_prefix != 'undefined') {
       data_fnm = fnm_prefix + '_data.json';
       metadata_fnm = fnm_prefix + '_metadata.json';
+    } else if (typeof collected_params.data_fnm != undefined) {
+      data_fnm = collected_params.data_fnm
+      metadata_fnm = collected_params.metadata_fnm
     } else {
-      data_fnm = collected_params.data_fnm || 'data' + '.json'
-      metadata_fnm = collected_params.metadata_fnm || 'metadata' + '.json'
+      data_fnm = 'data.json'
+      metadata_fnm = 'metadata.json'
     }
-    run();
+
+    run(data_fnm, metadata_fnm);
 
   </script>
   </body>
