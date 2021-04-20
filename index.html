@@ -32,7 +32,6 @@
   </head>
   <body>
     
-
     <script type="text/javascript" src="./js/crossfilter.v1.min.js"></script>
     <script type="text/javascript" src="./js/d3.v3.min.js"></script>   
     <script type="text/javascript" src="./js/dc.min.js"></script>
@@ -1445,7 +1444,7 @@
       //   if (err) {
       //     console.log(err)
       //   }
-        window.results = results
+        // window.results = results
         create_container(meta_lookup, total_meta_lookup)        
 
         // <-- BEGIN parse and clean dataset -->
@@ -2057,16 +2056,18 @@
         // TODO: replace with jq-like syntax
         if (typeof collected_params.json_extract != 'undefined') {
           results_data = {'data': results_data[collected_params.json_extract]}
+        } else if ( !Array.isArray(results_data.data) ) {
+          if ( !Array.isArray(results_data) ) {
+            console.warn('Data is not properly formatted.')
+          }
+          results_data = {'data': results_data}
         }
-        // console.log(results_data)
-
         
         if (typeof metadata_fnm != 'undefined') {
           // get metadata if fnm provided
           $.getJSON(fnm_path + metadata_fnm, function(results_metadata) {
 
             var total_meta_lookup = metadata_to_total_meta_lookup(results_metadata);
-            console.log(total_meta_lookup)
             get_meta_and_run(total_meta_lookup, results_data)
 
           })
