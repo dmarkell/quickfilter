@@ -1451,7 +1451,7 @@
 
         var top_filter = collected_params['top_filter'];
         if ( typeof top_filter != 'undefined' ) {
-          top_filter = JSON.parse(unescape(top_filter))
+          top_filter = url_param_to_json(top_filter)
         }
         // use top grep to remove rows
         // currently only takes case insensitive match
@@ -1494,7 +1494,7 @@
 
         var dim_formats;
         if (typeof collected_params.dim_formats !== 'undefined') {
-          dim_formats = JSON.parse(unescape(collected_params.dim_formats));
+          dim_formats = url_param_to_json(collected_params.dim_formats);
         } else {
           dim_formats = {};
         }
@@ -1502,7 +1502,7 @@
         var dims_to_convert_to_log = [];
         if (typeof collected_params.log_columns !== 'undefined') {
 
-          log_columns = JSON.parse(unescape(collected_params.log_columns));
+          log_columns = url_param_to_json(collected_params.log_columns);
           log_columns.forEach(function(c) {
             dims_to_convert_to_log.push(c) 
           })
@@ -1575,7 +1575,7 @@
         console_time('create_all.add_derived_columns')
         var derived_columns;
         if (typeof collected_params.derived_columns !== 'undefined') {
-          derived_columns = JSON.parse(unescape(collected_params.derived_columns));
+          derived_columns = url_param_to_json(collected_params.derived_columns);
           add_derived_columns(rows, derived_columns, meta_dims);
         };
         console_time_end('create_all.add_derived_columns')
@@ -1601,7 +1601,7 @@
         var manual_bins, manual_bins_dim;
         var manual_bins_raw = collected_params.manual_bins;
         if (typeof manual_bins_raw != 'undefined') {
-          manual_bins = JSON.parse(unescape(manual_bins_raw));
+          manual_bins = url_param_to_json(manual_bins_raw);
         }
       
         console_time('create_all.add_derived_dates and grouping')
@@ -1761,7 +1761,7 @@
           var primary_key, link_columns;
           if (typeof collected_params.link_columns !== 'undefined') {
 
-            link_columns = JSON.parse(unescape(collected_params.link_columns));
+            link_columns = url_param_to_json(collected_params.link_columns);
           }
 
           var columns = [];
@@ -2012,14 +2012,14 @@
         var selected_dims = other_dims.slice(0, max_dim_ct);
         selected_dim_names = _.pluck(selected_dims, 'label_short');
       } else {
-        selected_dim_names = JSON.parse(unescape(input_selected_dims));
+        selected_dim_names = url_param_to_json(input_selected_dims);
       }
 
       var selected_pk_names = _.pluck(pks, 'label_short');
 
       var input_date_dims = collected_params['date_dims'];
       if (typeof input_date_dims != 'undefined') {
-        var date_dims = JSON.parse(unescape(input_date_dims));
+        var date_dims = url_param_to_json(input_date_dims);
         date_dims.forEach(function(d) {
           total_meta_lookup[d].type = 'date'
         })
@@ -2027,7 +2027,7 @@
 
       var input_date_dims = collected_params['date_dims'];
       if (typeof input_date_dims != 'undefined') {
-        var date_dims = JSON.parse(unescape(input_date_dims));
+        var date_dims = url_param_to_json(input_date_dims);
 
         date_dims.forEach(function(d) {
           total_meta_lookup[d].type = 'date'
@@ -2036,7 +2036,7 @@
 
       var input_dim_types = collected_params['dim_types'];
       if (typeof input_dim_types != 'undefined') {
-        var dim_types = JSON.parse(unescape(input_dim_types));
+        var dim_types = url_param_to_json(input_dim_types);
         for (k in dim_types) {
           // override type in total_meta_lookup
           total_meta_lookup[k].type = dim_types[k]
@@ -2053,7 +2053,7 @@
 
     }
 
-    var run = function(data_fnm, metadata_fnm) {
+    var run = function(fnm_path, data_fnm, metadata_fnm) {
 
       d3.json(fnm_path + data_fnm, function(err, results_data) {
 
@@ -2066,7 +2066,7 @@
           results_data = {'data': results_data[collected_params.json_extract]}
         } else if (Array.isArray(results_data) && typeof collected_params.json_extract_filter != 'undefined') {
           var out = []
-          var json_extract_filter = JSON.parse(unescape(collected_params.json_extract_filter));
+          var json_extract_filter = url_param_to_json(collected_params.json_extract_filter);
           results_data.forEach(function(item, i) {
             var row = {}
             // if (i == 0) {
@@ -2117,8 +2117,13 @@
     
     };
 
-    // TODO: finish this (add to url params & refresh on editing data)
+    function url_param_to_json(encoded_param) {
+      // TODO: unescape seems deprecated (https://www.w3schools.com/jsref/jsref_unescape.asp)
+      // currently double-unescaping because sometimes these strings get double-encoded
+      return JSON.parse(unescape(unescape(encoded_param)))
+    } 
 
+    // TODO: finish this (add to url params & refresh on editing data)
     function encodeQueryData(data) {
      const ret = [];
      for (let d in data)
@@ -2147,7 +2152,7 @@
     var extra_pks;
     if (typeof collected_params.primary_keys !== 'undefined') {
 
-      extra_pks = JSON.parse(unescape(collected_params.primary_keys));
+      extra_pks = url_param_to_json(collected_params.primary_keys);
       extra_pks.forEach(function(pk) {
         primary_key_labels.push(pk) 
       })
@@ -2155,13 +2160,15 @@
 
     var dim_filters = collected_params['dim_filters'];
       if ( typeof dim_filters != 'undefined' ) {
-        dim_filters = JSON.parse(unescape(dim_filters))
+        dim_filters = url_param_to_json(dim_filters)
     }
 
     var date_dim_parsers;
     var input_date_dim_parsers = collected_params['date_dim_parsers'];
     if (typeof input_date_dim_parsers != 'undefined') {
-      date_dim_parsers = JSON.parse(unescape(input_date_dim_parsers));
+
+      date_dim_parsers = url_param_to_json(input_date_dim_parsers);
+      
     } else {
       date_dim_parsers = {}
     }
@@ -2172,7 +2179,7 @@
     var date_dim_offsets;
     var input_date_dim_offsets = collected_params['date_dim_offsets'];
     if (typeof input_date_dim_offsets != 'undefined') {
-      date_dim_offsets = JSON.parse(unescape(input_date_dim_offsets));
+      date_dim_offsets = url_param_to_json(input_date_dim_offsets);
     } else {
       date_dim_offsets = {}
     }
@@ -2183,7 +2190,7 @@
     var number_dim_bin_arrays;
     var input_number_dim_bin_arrays = collected_params['number_dim_bin_arrays'];
     if (typeof input_number_dim_bin_arrays != 'undefined') {
-      number_dim_bin_arrays = JSON.parse(unescape(input_number_dim_bin_arrays));
+      number_dim_bin_arrays = url_param_to_json(input_number_dim_bin_arrays);
     } else {
       number_dim_bin_arrays = {}
     }
@@ -2199,14 +2206,14 @@
     }
     
     default_fnm_path = is_local == 1 ? "../datasets/" : 'http://quickfilter.s3-website-us-east-1.amazonaws.com/datasets/'
-    
-    // prefix will be used for both data_fnm and metadata_fnm
+
+   // prefix will be used for both data_fnm and metadata_fnm
     var fnm_prefix = collected_params.fnm_prefix;
     var fnm_path = collected_params.fnm_path || default_fnm_path;
     if ( typeof fnm_prefix != 'undefined') {
       data_fnm = fnm_prefix + '_data.json';
       metadata_fnm = fnm_prefix + '_metadata.json';
-    } else if (typeof collected_params.data_fnm != undefined) {
+    } else if (typeof collected_params.data_fnm != 'undefined') {
       data_fnm = collected_params.data_fnm
       metadata_fnm = collected_params.metadata_fnm
     } else {
@@ -2214,7 +2221,7 @@
       metadata_fnm = 'metadata.json'
     }
 
-    run(data_fnm, metadata_fnm);
+    run(fnm_path, data_fnm, metadata_fnm);
 
   </script>
   </body>
