@@ -38,6 +38,7 @@ svg {
   text-shadow: 0 1px 0 #fff;
   cursor: move;
   font-weight: bold;
+  fill: #222;
 }
 
 h2 {

@@ -1,20 +1,3 @@
-// Various formatters.
-  var formatNumberGeneral = d3.format("d"),
-    formatNumber = d3.format(",d"),
-    formatNumberPrec1 = d3.format(",.1f"),
-    formatNumberPrec0 = d3.format(",.0f"),
-    formatPrec0 = d3.format(".0f"),
-    formatPrec1 = d3.format(".1f"),
-    formatPrec2 = d3.format(".2f"),
-    formatPrec3 = d3.format(".3f"),
-    formatChange = d3.format("+,d"),
-    formatPercent2 = d3.format(".2%"),
-    formatPercent1 = d3.format(".1%"),
-    formatPercent0 = d3.format("%"),
-    formatDate = d3.time.format("%B %d, %Y"),
-    formatDateShort = d3.time.format("%b. %d, %Y"),
-    formatTime = d3.time.format("%I:%M %p")
-  ;
 
 var get_lin_reg_line = function(data, dim_x, dim_y) {
 
@@ -67,29 +50,79 @@ var make_scatterplot_matrix = function(container_id, data, dims_to_include, seri
     // Clear the previously-active brush, if any.
     function brushstart(p) {
       if (brushCell !== this) {
-        // d3.select(brushCell).call(brush.move, null);
-        
-         d3.select(brushCell).call(brush.clear());
-      x.domain(domainByTrait[p.x]);
-      y.domain(domainByTrait[p.y]);
-      brushCell = this;
+
+        if ( d3.version.startsWith('4.') ) {
+          d3.select(brushCell).call(brush.move, null);
+        } else {
+          d3.select(brushCell).call(brush.clear()); 
+        } 
+        x.domain(domainByTrait[p.x]);
+        y.domain(domainByTrait[p.y]);
+        brushCell = this;
+      }
+    }
+
+    if ( d3.version.startsWith('4.') ) {
+      // Highlight the selected circles.
+      function brushmove(p) {
+
+          var e = d3.brushSelection(this);
+          svg.selectAll("circle").classed("hidden", function(d) {
+          return !e
+            ? false
+            : (
+              e[0][0] > x(d[p.x]) || x(d[p.x]) > e[1][0]
+              || e[0][1] > y(d[p.y]) || y(d[p.y]) > e[1][1]
+            );
+        });
+      }
+    } else {
+      // Highlight the selected circles.
+      function brushmove(p) {
+
+        var e = brush.extent(); 
+        svg.selectAll("circle").classed("hidden", function(d) {
+          return !e
+            ? false
+            : (
+              e[0][0] > d[p.x] || d[p.x] > e[1][0]
+              || e[0][1] > d[p.y] || d[p.y] > e[1][1]
+            );
+        });
       }
     }
 
     // Highlight the selected circles.
     function brushmove(p) {
-    var e = brush.extent();
-    svg.selectAll("circle").classed("hidden", function(d) {
-      return e[0][0] > d[p.x] || d[p.x] > e[1][0]
-          || e[0][1] > d[p.y] || d[p.y] > e[1][1];
-    });
-  }
 
-    // If the brush is empty, select all circles.
-    function brushend() {
-      // var e = d3.brushSelection(this);
-      // if (e === null) svg.selectAll(".hidden").classed("hidden", false);
-      if (brush.empty()) svg.selectAll(".hidden").classed("hidden", false);
+      if ( d3.version.startsWith('4.') ) {
+        var e = d3.brushSelection(this);
+      } else {
+        var e = brush.extent(); 
+      }
+      svg.selectAll("circle").classed("hidden", function(d) {
+        return !e
+          ? false
+          : (
+            e[0][0] > d[p.x] || d[p.x] > e[1][0]
+            || e[0][1] > d[p.y] || d[p.y] > e[1][1]
+          );
+      });
+    }
+
+
+
+    if ( d3.version.startsWith('4.') ) {
+      // If the brush is empty, select all circles.
+      function brushend() {
+        var e = d3.brushSelection(this);
+        if (e === null) svg.selectAll(".hidden").classed("hidden", false);
+      }
+    } else {
+      // If the brush is empty, select all circles.
+      function brushend() {
+        if (brush.empty()) svg.selectAll(".hidden").classed("hidden", false);
+      }
     }
 
     function cross(a, b) {
@@ -103,21 +136,33 @@ var make_scatterplot_matrix = function(container_id, data, dims_to_include, seri
         padding = 20
     ;
 
-    // var x = d3.scaleLinear()
-    var x = d3.scale.linear()
-        .range([padding / 2, size - padding / 2]);
+    var x, y, xAxis, yAxis;
+    if ( d3.version.startsWith('4.') ) {
+      x = d3.scaleLinear()
+      y = d3.scaleLinear()
+      xAxis = d3.axisBottom()
+      yAxis = d3.axisLeft()
+    } else {
+      x = d3.scale.linear()
+      y = d3.scale.linear()
+      xAxis = d3.svg.axis()
+      yAxis = d3.svg.axis().orient('left')
+    }
+    
+    x
+      .range([padding / 2, size - padding / 2])
+    ;
+    
+    y
+      .range([size - padding / 2, padding / 2])
+    ;
 
-    // var y = d3.scaleLinear()
-    var y = d3.scale.linear()
-        .range([size - padding / 2, padding / 2]);
+    xAxis
+      .scale(x)
+      .ticks(6)
+    ;
 
-    // var xAxis = d3.axisBottom()
-    var xAxis = d3.svg.axis()
-        .scale(x)
-        .ticks(6);
-
-    // var yAxis = d3.axisLeft()
-    var yAxis = d3.svg.axis().orient('left')
+    yAxis
         .scale(y)
         .ticks(6)
     ;
@@ -158,15 +203,21 @@ var make_scatterplot_matrix = function(container_id, data, dims_to_include, seri
     xAxis.tickSize(size * n);
     yAxis.tickSize(-size * n);
 
-    // var brush = d3.brush()
-    var brush = d3.svg.brush()
-        .x(x)
-        .y(y)
-        .on("brushstart", brushstart)
+    if ( d3.version.startsWith('4.') ) {
+      var brush = d3.brush()
+        .on("start", brushstart)
         .on("brush", brushmove)
-        .on("brushend", brushend)
-        // .extent([[0,0],[size,size]])
-    ;
+        .on("end", brushend)
+        .extent([[0,0],[size,size]])
+    } else {
+      var brush = d3.svg.brush()
+          .x(x)
+          .y(y)
+          .on("brushstart", brushstart)
+          .on("brush", brushmove)
+          .on("brushend", brushend)
+      ;
+    }
 
     // clear container
     d3.select('#' + container_id).html('')
@@ -219,12 +270,12 @@ var make_scatterplot_matrix = function(container_id, data, dims_to_include, seri
         .attr("dy", ".71em")
         .text(function(d) {
           var out = 'y = '
-          out += formatPrec1(reg_lines_lookup[d.x + '.' + d.y].m)
+          out += d3.format(".1f")(reg_lines_lookup[d.x + '.' + d.y].m)
           out += 'x + '
-          out += formatPrec1(reg_lines_lookup[d.x + '.' + d.y].b)
+          out += d3.format(".1f")(reg_lines_lookup[d.x + '.' + d.y].b)
           out += ', '
           out += 'R2 = '
-          out += formatPrec3(reg_lines_lookup[d.x + '.' + d.y].r2)
+          out += d3.format(".3f")(reg_lines_lookup[d.x + '.' + d.y].r2)
           return  out
 
         })
@@ -236,10 +287,17 @@ var make_scatterplot_matrix = function(container_id, data, dims_to_include, seri
 
       var cell = d3.select(this);
 
-      var line = d3.svg.line()
-         .x(d => x(d.x))
-         .y(d => y(d.y))
-      ;
+      if ( d3.version.startsWith('4.') ) {
+        var line = d3.line()
+           .x(d => x(d.x))
+           .y(d => y(d.y))
+        ;
+      } else {      
+        var line = d3.svg.line()
+           .x(d => x(d.x))
+           .y(d => y(d.y))
+        ;
+      }
 
       x.domain(domainByTrait[p.x]);
       y.domain(domainByTrait[p.y]);

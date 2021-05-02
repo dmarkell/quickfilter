@@ -1,5 +1,5 @@
     // <-- BEGIN make_parallel_coords -->
-    var make_parallel_coords = function(el_id, data, dims_to_include, series_key, colorscheme) {
+    var make_parallel_coords = function(el_id, data, dims_to_include, series_key, colorscheme, dim_ranges) {
 
     var default_colorscheme = ['#800','#080','#008','#806900','#CC8600'];
 
@@ -8,17 +8,30 @@
         h = 800 - m[0] - m[2];
 
       var x,
-          y = {}
+          foreground
       ;
 
-      var species = [],
+      var y = {},
+          species = [],
           traits = []
       ;
 
-      var line = d3.svg.line(),
-          axis = d3.svg.axis().orient("left"),
-          foreground
+      var line
+          , axis
       ;
+
+      if ( d3.version.startsWith('4.') ) { 
+        line = d3.line(),
+        axis = d3.axisLeft()
+        ;
+      } else {
+        line = d3.svg.line(),
+        axis = d3.svg.axis().orient("left")
+        ;
+      }
+
+
+
 
       var make_set = function(arr) {
         var out = [];
@@ -43,15 +56,51 @@
         return line(traits.map(function(p) { return [x(p), y[p](d[p])]; }));
       }
 
-      // Handles a brush event, toggling the display of foreground lines.
-      function brush() {
-        var actives = traits.filter(function(p) { return !y[p].brush.empty(); }),
-            extents = actives.map(function(p) { return y[p].brush.extent(); });
-        foreground.classed("fade", function(d) {
-          return !actives.every(function(p, i) {
-            return extents[i][0] <= d[p] && d[p] <= extents[i][1];
+      function brushstart() {
+        d3.event.sourceEvent.stopPropagation();
+      }
+
+      if ( d3.version.startsWith('4.') ) { 
+            
+        function brush() {
+          var actives = [];
+          svg.selectAll(".brush")
+          // svg.selectAll(".axis .brush")
+            .filter(function(d) {
+              return d3.brushSelection(this);
+            })
+            .each(function(d) {
+              actives.push({
+                dimension: d,
+                extent: d3.brushSelection(this)
+              });
+            });
+
+            foreground.classed("fade", function(d) {
+              
+              return !actives.every(function(p) {
+                // invert the screen coordinates via axis scale... and reverse bc the scale is upside-down
+                // see https://github.com/d3/d3-scale/blob/master/README.md#continuous_invert
+                var extent_inv = p.extent.map(function(e) { return y[p.dimension].invert(e) }).reverse()
+                return d[p.dimension] >= extent_inv[0] && d[p.dimension] <= extent_inv[1];
+              });
+
+            });
+
+        }
+      } else {
+
+        // Handles a brush event, toggling the display of foreground lines.
+        function brush() {
+          var actives = traits.filter(function(p) { return !y[p].brush.empty(); }),
+              extents = actives.map(function(p) { return y[p].brush.extent(); });
+          
+          foreground.classed("fade", function(d) {
+            return !actives.every(function(p, i) {
+              return extents[i][0] <= d[p] && d[p] <= extents[i][1];
+            });
           });
-        });
+        }
       }
 
       d3.select('#' + el_id).html('')
@@ -70,11 +119,7 @@
       dims_to_include = dims_to_include || Object.keys(data[0]).slice(1,5);
       colorscheme = colorscheme || default_colorscheme;
       traits = dims_to_include
-
-      var dim_ranges;
-      if (typeof collected_params.dim_ranges !== 'undefined') {
-        dim_ranges = JSON.parse(unescape(collected_params.dim_ranges));
-      };
+      var default_color = 'blanchedalmond'
 
       var row,r,k,sett,val,r_min,r_max;
 
@@ -101,7 +146,11 @@
         };
       }
 
-      x = d3.scale.ordinal().domain(traits).rangePoints([0, w]);
+      if ( d3.version.startsWith('4.') ) { 
+        x = d3.scalePoint().domain(traits).range([0, w]);
+      } else {
+        x = d3.scale.ordinal().domain(traits).rangePoints([0, w]);
+      }
 
       species = make_set(data.map(function(el) { return el[series_key]}));
 
@@ -110,19 +159,44 @@
         // Coerce values to numbers.
         data.forEach(function(p) { p[d] = +p[d]; });
 
-        // console.log(d)
-        y[d] = d3.scale.linear()
-            .domain(d3.extent(data, function(p) { return p[d]; }))
-            .range([h, 0]);
+        if ( d3.version.startsWith('4.') ) {
+          y[d] = d3.scaleLinear()
+              .domain(d3.extent(data, function(p) { return p[d]; }))
+              .range([h, 0])
+          ;
 
-        y[d].brush = d3.svg.brush()
+          y[d].brush = d3.brushY()
+            .extent([[-10,0],[10,h]])
+            .on("start", brushstart)
+            .on("brush", brush)
+            .on("end", brush)
+          ;          
+
+        } else {
+          y[d] = d3.scale.linear()
+              .domain(d3.extent(data, function(p) { return p[d]; }))
+              .range([h, 0])
+          ;
+
+          y[d].brush = d3.svg.brush()
             .y(y[d])
-            .on("brush", brush);
+            .on("brush", brush)
+          ;
+        }
+
+        
      });
+
+      // only show series that have individual colors
+      var legend_data = species.slice(0, colorscheme.length)
+      // add additional "other" element if needed
+      if (species.length > colorscheme.length) {
+        legend_data.push(null)
+      };
 
       // Add a legend.
       var legend = svg.selectAll("g.legend")
-          .data(species)
+          .data(legend_data)
         .enter().append("svg:g")
           .attr("class", "legend")
           .attr("transform", function(d, i) { return "translate(0," + (i * 20 + 584) + ")"; });
@@ -130,15 +204,25 @@
       legend.append("svg:line")
           .attr("class", function(d) { return string_to_series_class(d, species) })
           .attr("x2", 8)
-          .attr('stroke', function(d) {
-            return colorscheme[species.indexOf(d)]
+          .attr('stroke', function(d, i) {
+            if (species.length > colorscheme.length && i == legend_data.length - 1) {
+              return default_color
+            } else {
+              return colorscheme[species.indexOf(d)]
+            }
           })
       ;
 
       legend.append("svg:text")
         .attr("x", 12)
         .attr("dy", ".31em")
-        .text(function(d) { return d; })
+        .text(function(d, i) { 
+          if (species.length > colorscheme.length && i == legend_data.length - 1) {
+            return "Other"
+          } else {
+            return d;
+          }
+        })
       ;
 
       // Add foreground lines.
@@ -152,7 +236,8 @@
               return d_to_series_class(d, series_key, species)
           })
           .attr('stroke', function(d) {
-            return colorscheme[species.indexOf(d[series_key])]
+
+            return colorscheme[species.indexOf(d[series_key])] || default_color
           })
       ;
 
@@ -178,6 +263,7 @@
           .each(function(d) { d3.select(this).call(axis.scale(y[d])); })
         .append("svg:text")
           .attr("text-anchor", "middle")
+          .attr("class", "title")
           .attr("y", -9)
           .text(String)
       ;
