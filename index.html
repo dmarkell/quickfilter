@@ -33,7 +33,7 @@
   <body>
     <script type="text/javascript" src="./js/crossfilter.v1.min.js"></script>
 
-    <!-- import with script -->
+    <!-- import with script depending on version -->
     <!-- 
           <script type="text/javascript" src="./js/d3.v3.min.js"></script>      
           <script type="text/javascript" src="./js/dc.min.js"></script>
@@ -45,14 +45,18 @@
     <script type="text/javascript" src="./js/jquery-2.1.1.min.js"></script>
     <script type="text/javascript" src="./js/jquery.dataTables.min.js"></script>
     <script type="text/javascript" src="./js/underscore.js"></script>
-    <!-- import with script since it depends on d3 -->
+    <script type="text/javascript" src="./js/simple-statistics.min.js"></script>
+    
+    <!-- import in scrpit since they depends on d3 -->
     <!--     
       <script type="text/javascript" src="./js/d3-time.v1.min.js"></script>
+      <script type="text/javascript" src="./js/quick_parallel_coords.js"></script>
+      <script type="text/javascript" src="./js/quick_scatterplot_matrix.js"></script>
     -->
-    <script type="text/javascript" src="./js/simple-statistics.min.js"></script>
+    
   
-    <script type="text/javascript" src="./js/quick_parallel_coords.js"></script>
-    <script type="text/javascript" src="./js/quick_scatterplot_matrix.js"></script>
+    
+
   <script>
   
   var quickfilter = function() {
@@ -2367,6 +2371,8 @@
       ] 
     }
     script_imports.push('./js/d3-time.v1.min.js')
+    script_imports.push('./js/quick_parallel_coords.js')
+    script_imports.push('./js/quick_scatterplot_matrix.js')
 
     // TODO: this is embarassing, but I couldn't be bothered to make it recursive
     $.ajax({
@@ -2383,7 +2389,27 @@
               url: script_imports[2],
               dataType: "script",
               async: false,           // <-- This is the key
-              success: quickfilter,
+              success: function() {
+                  $.ajax({
+                    url: script_imports[3],
+                    dataType: "script",
+                    async: false,           // <-- This is the key
+                    success: function() {
+                        $.ajax({
+                          url: script_imports[4],
+                          dataType: "script",
+                          async: false,           // <-- This is the key
+                          success: quickfilter,
+                          error: function () {
+                              throw new Error("Could not load script " + script);
+                          }
+                        })
+                      },
+                    error: function () {
+                        throw new Error("Could not load script " + script);
+                    }
+                  })
+                },
               error: function () {
                   throw new Error("Could not load script " + script);
               }
@@ -2398,6 +2424,7 @@
           throw new Error("Could not load script " + script);
       }
     });
+
 
 
   </script>
