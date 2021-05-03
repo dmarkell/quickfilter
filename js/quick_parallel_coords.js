@@ -1,4 +1,4 @@
-    // <-- BEGIN make_parallel_coords -->
+   // <-- BEGIN make_parallel_coords -->
     var make_parallel_coords = function(el_id, data, dims_to_include, series_key, colorscheme, dim_ranges) {
 
     var default_colorscheme = ['#800','#080','#008','#806900','#CC8600'];

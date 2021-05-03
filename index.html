@@ -4,7 +4,6 @@
     <link id="favicon" rel="icon" type="image/x-icon" href="./static/odysseus.png">
     <link rel="stylesheet" type="text/css" href="./css/datatables_style.css">
     <link rel="stylesheet" type="text/css" href="./css/quick_parallel_coords_style.css">
-    <link rel="stylesheet" type="text/css" href="./css/quick_scatterplot_matrix_style.css">
     <title id="title">quickfilter</title>
     <style>
       .linkCol {
@@ -23,6 +22,13 @@
 
       .section-header {
         text-align:left;
+      }
+
+      line.regression {
+        stroke: tomato;
+        fill: none;
+        stroke-width: 1.2;
+        stroke-dasharray: 3,5;
       }
 
     </style>
@@ -45,7 +51,7 @@
     <script type="text/javascript" src="./js/jquery-2.1.1.min.js"></script>
     <script type="text/javascript" src="./js/jquery.dataTables.min.js"></script>
     <script type="text/javascript" src="./js/underscore.js"></script>
-    <script type="text/javascript" src="./js/simple-statistics.min.js"></script>
+    <script type="text/javascript" src="./js/regression.js"></script>
     
     <!-- import in scrpit since they depends on d3 -->
     <!--     
@@ -578,9 +584,11 @@
           // selecting a field as a dim overrides it as a pk (default or selected)
           // TODO: if it was selected as a pk, should probably warn about this override
           if (selected_pk_names.indexOf(item.label_short) != -1 && selected_dim_names.indexOf(item.label_short) == -1) {
+            // primary keys
               payload.primary_keys[item.label_short] = item  
           // add dimension entry for selected dims that are a derived date type, if the dimension is a date type
           } else if (item.type == 'date') {
+            // date types
             // TODO: take week specifying week start
             // TODO: rather than get these from selected_dim_names, these should probably come in as a separate
             // parameter includeing date_subtypes
@@ -604,6 +612,7 @@
             }
 
           } else if (item.type == 'number') {
+            // number types
             
             var number_bin_els = _.intersection([item.label_short + '_bins'], selected_dim_names)
             
@@ -621,8 +630,12 @@
 
 
           } else if (selected_dim_names.indexOf(item.label_short) != -1) {
+            // other unhandled cases
             payload.dimensions[item.label_short] = item
-            // log input order for certain uses
+          }
+
+          // add input order for any included dimensions regardless of type
+          if (selected_dim_names.indexOf(item.label_short) != -1) {
             payload.dimensions[item.label_short].input_order = selected_dim_names.indexOf(item.label_short)
           }
 
@@ -1268,11 +1281,14 @@
                         .append($("<h2></h2>").text("Scatterplot Matrix"))
                         .append($("<span></span>").addClass("toggler").text("(hide)"))
                     )
+                    // .append(
+                    //   $("<div></div>")
+                    //     .attr("id", "scatterplot-matrix")
+                    //     .text("Not yet implemented")
+                    // )
                     .append(
-                      $("<div></div>")
-                        .attr("id", "scatterplot-matrix")
-                        .text("Not yet implemented")
-
+                      $("<table></table>")
+                        .attr("id", "content")
                     )
                   )
                   // <--- END scatterplot-matrix section --->
@@ -1545,8 +1561,6 @@
               })
       }
 
-
-
       var create_all = function(results, meta_lookup, total_meta_lookup) {
 
         window.meta_lookup = meta_lookup
@@ -1701,7 +1715,7 @@
 
           var all = ndx.groupAll();
 
-          var dims = {};
+          dims = {};
           var groups = {};
 
           var get_rounder = function(r_factor) {
@@ -1857,218 +1871,370 @@
 
           console_time("create_all.make_data_count")
           dc.dataCount('.data-count')
-            .dimension(ndx)
-            .group(all)
+            .crossfilter(ndx)
+            .groupAll(all)
           ;
           console_time_end("create_all.make_data_count")
 
+          // selects arbitrary primary key -- TODO: allow choice including randomly
+          var primary_key = Object.keys(meta_pks)[0];
+          
+          // <-- begin parallel sections -->    
+          // TODO: paracoords is slow, only render it when visible (also make it faster)
+          // creates the parallel coords section (using quick_parallel_coords.make_parallel_coords)
+          // where it's a number type
+          
+          var dims_to_include = {};
+          $.each(meta_lookup.dimensions, function(k,v) {
+            if (typeof meta_lookup.primary_keys[k] == 'undefined' && v.type == 'number') {
+              dims_to_include[k] = v.input_order
+            }
+          })
+
+          var series_key = null;
+          $.each(meta_lookup.dimensions, function(k,v) {
+            if (typeof meta_lookup.primary_keys[k] == 'undefined' && v.type == 'string' && series_key == null) {
+              series_key = k
+            }
+          })
+
+          var default_colorscheme = d3.schemeCategory10
+
+          if (typeof collected_params.colors !== 'undefined') {
+            var colorscheme = []
+            var hex_colors_from_url = _.map(collected_params["colors"].split(','), function(c) { return '#' + c })
+            hex_colors_from_url.forEach(function(c, i) {
+                colorscheme[i] = c
+            })
+          }
+          colorscheme = colorscheme || default_colorscheme;
+          
+          // convert to ordered array; note coalesces null or undefined to Infinity to sort them last
+          dims_to_include = _.sortBy(_.keys(dims_to_include), function(k) { return dims_to_include[k] || Infinity })
+
+          console_time('makeParallelSections.make_paracoords')
+          var max_parallel_coords_rows = 10000
+
+          make_parallel_coords(
+            'parallel-coordinates',
+            dims[primary_key].top(max_parallel_coords_rows),
+            // TODO: put dims in the right order (total_meta_lookup drops order from input)
+            dims_to_include,
+            // TODO: prioritize or choose series via UI
+            series_key || 1,
+            colorscheme
+          )
+
+          console_time_end('makeParallelSections.make_paracoords')
+
+          console_time('makeParallelSections.make_splom')
+
+
+          // dynamic to number of dimensions (can only be sqrt(32 - # other dimensions))
+          // TODO: write tests for this
+          var max_splom_size = Math.max(0,Math.floor(Math.sqrt(32-_.keys(dims).length))); // 5x5
+          // var max_splom_size = 3
+          if (max_splom_size < 5) {
+            console.warn("Scatterplot Matrix limited to " + max_splom_size + ' X ' + max_splom_size + ' due to limit of 32 dimensions in Crossfilter (see https://github.com/square/crossfilter/wiki/API-Reference#dimension' )
+          }
+          var splom_dims_to_include = dims_to_include.slice(0, max_splom_size)
+          var max_splom_rows = 10000
+          // TODO: why is this in MakeParallelCoords function?
+          // TODO: send in dimension format for scales & best fit equations
+          // make_scatterplot_matrix(
+          //   'scatterplot-matrix',
+          //   dims[primary_key].top(max_splom_rows),
+          //   splom_dims_to_include,
+          //   // series_key || 1,
+          //   // TODO: enable series (color coding works as is
+          //   // but need to figure out whether they get separate
+          //   // best fit lines)
+          //   1,
+          //   colorscheme
+          // )
+
+          var rows = ['heading'].concat(splom_dims_to_include.slice(0).reverse()),
+              cols = ['heading'].concat(splom_dims_to_include)
+          ;
+          var splom_charts = [];
+          if (series_key) {
+            var series_domain = _.pluck(groups[series_key + 's'].top(Infinity), 'key')
+          } else {
+            var series_domain = []
+          }
+
+          function make_dimension(var1, var2) {
+            // name the dimension in the form "y vs x" (row vs. col)
+            // TODO: check for & handle collisions with other dimensions
+            var interaction_key = var2 + '_vs_' + var1
+            var dim = ndx.dimension(function(d, i) {
+            
+              return [d[var1], d[var2], series_key ? d[series_key] : 1];
+            })
+            dims[interaction_key] = dim
+
+            return dim
+          }
+          function key_part(i) {
+              return function(kv) {
+                  return kv.key[i];
+              };
+          }
+          
+          function draw_regression_line(chart) {
+            var xext = d3.extent(chart.group().all(), kv => kv.key[0]);
+            var r = regression.linear(chart.group().all().map(kv => [kv.key[0], kv.key[1]])),
+                m = r.equation[0], b = r.equation[1],
+                [x1, x2] = chart.x().domain();
+            var points = [[
+                x1,
+                m * x1 + b
+            ], [
+                x2,
+                m * x2 + b
+            ]];
+            
+            var xScale = chart.x(), yScale = chart.y(), margins = chart.margins();
+            var line = chart.g().selectAll('line.regression').data([points]);
+            function do_points(line) {
+              line
+                  .attr('x1', d => xScale(d[0][0]) + margins.left)
+                  .attr('y1', d => yScale(d[0][1]) + margins.top)
+                  .attr('x2', d => xScale(d[1][0]) + margins.left)
+                  .attr('y2', d => yScale(d[1][1]) + margins.top);
+            }
+
+            line = line.enter().append('line')
+              .attr('class', 'regression')
+              .call(do_points)
+              .merge(line)
+            ;
+          }
+
+          d3.select('#content')
+            .selectAll('tr').data(rows)
+            .enter().append('tr').attr('class', function(d) {
+                return d === 'heading' ? 'heading row' : 'row';
+            })
+            .each(function(row, y) {
+                d3.select(this).selectAll('td').data(cols)
+                    .enter().append('td').attr('class', function(d) {
+                        return d === 'heading' ? 'heading entry' : 'entry';
+                    })
+                    .each(function(col, x) {
+                        var cdiv = d3.select(this).append('div')
+                        if(row === 'heading') {
+                            if(col !== 'heading')
+                                cdiv.text(col.replace('_', ' '))
+                            return;
+                        }
+                        else if(col === 'heading') {
+                            cdiv.text(row.replace('_', ' '))
+                            return;
+                        }
+                        cdiv.attr('class', 'chart-holder');
+                        var chart = new dc.ScatterPlot(cdiv);
+                        var dim = make_dimension(col,row),
+                        // TODO: create interaction grouper
+                            group = dim.group()
+                        ;
+                        var showYAxis = x === 1,
+                            showXAxis = y === rows.length - 1
+                        ;
+                        chart
+                            .transitionDuration(0)
+                            .width(200 + (showYAxis?25:0))
+                            .height(200 + (showXAxis?20:0))
+                            .margins({
+                                left: showYAxis ? 25 : 8,
+                                top: 5,
+                                right: 0,
+                                bottom: showXAxis ? 20 : 5
+                            })
+                            .dimension(dim).group(group)
+                            .keyAccessor(key_part(0))
+                            .valueAccessor(key_part(1))
+                            .colorAccessor(key_part(2))
+                            .colors(d3.scaleOrdinal(colorscheme))
+                            .colorDomain(series_domain)
+                            .x(d3.scaleLinear()).xAxisPadding("0.001%")
+                            .y(d3.scaleLinear()).yAxisPadding("0.001%")
+                            .brushOn(true)
+                            .elasticX(true)
+                            .elasticY(true)
+                            .symbolSize(7)
+                            .nonemptyOpacity(0.7)
+                            .emptySize(7)
+                            .emptyColor('#ccc')
+                            .emptyOpacity(0.7)
+                            .excludedSize(7)
+                            .excludedColor('#ccc')
+                            .excludedOpacity(0.7)
+                            .renderHorizontalGridLines(true)
+                            .renderVerticalGridLines(true)
+                        ;
+                        chart.xAxis().ticks(6);
+                        chart.yAxis().ticks(6);
+                        chart.on('postRender', function(chart) {
+                            // remove axes unless at left or bottom
+                            if(!showXAxis)
+                                chart.select('.x.axis').attr('display', 'none');
+                            if(!showYAxis)
+                                chart.select('.y.axis').attr('display', 'none');
+                            // remove clip path, allow dots to display outside
+                            chart.select('.chart-body').attr('clip-path', null);
+
+                            // <--regression line
+                            if (row !== col) {
+                              draw_regression_line(chart)
+                            }
+                            // regression line -->
+
+                        });
+                        // only filter on one chart at a time
+                        chart.on('filtered', function(_, filter) {
+                            if(!filter)
+                                return;
+                            splom_charts.forEach(function(c) {
+                                if(c !== chart)
+                                    c.filter(null);
+                                    draw_regression_line(c)
+                            });
+                        });
+
+
+                        splom_charts.push(chart);
+                    });
+              });
+
+
+
+          console_time_end('makeParallelSections.make_splom')
+          // <-- end parallel sections -->
+
+          console_time("create_all.make_datatable")
+          // <-- BEGIN datatable -->
           // bind jquery dataTable to dc tables
           // http://stackoverflow.com/questions/21113513/dcjs-reorder-datatable-by-column
           // TODO(?): make searching datatable filter the crossfilter & parallelCoords
 
-          console_time("create_all.make_datatable")
-          // <-- BEGIN datatable -->
-          // selects arbitrary primary key -- TODO: allow choice including randomly
-          var primary_key = Object.keys(meta_pks)[0];
+          // should be an object, where keys are field names and values are link_prefix
+          // TODO: allow template string, but then you need to specify the variable name
+          // to make the link {"field1": "https://www.google.com/search?q="}
+          var link_columns;
+          if (typeof collected_params.link_columns !== 'undefined') {
 
-            // should be an object, where keys are field names and values are link_prefix
-            // TODO: allow template string, but then you need to specify the variable name
-            // to make the link {"field1": "https://www.google.com/search?q="}
-            var primary_key, link_columns;
-            if (typeof collected_params.link_columns !== 'undefined') {
+            link_columns = url_param_to_json(collected_params.link_columns);
+          }
 
-              link_columns = url_param_to_json(collected_params.link_columns);
+          var columns = [];
+          $.each(meta_dims, function(k, v) {
+
+            if ( typeof v.date_source == 'undefined' ) {
+              var col = {
+                data: v.label_short,
+                title: titleify(v.label_short),
+                defaultContent: ""
+              }
+
+              // for non-pk number types, 
+              if (number_types.indexOf(v.type) != -1 && typeof meta_lookup.primary_keys[k] == 'undefined') {
+                col.render = get_xformatter(decide_rounding_by_dim(dims, v.label_short))
+              }
+              // override with dim_formatter
+
+              if (typeof dim_formats[k] != 'undefined' && typeof dim_formatters[dim_formats[k]] != 'undefined') {
+                col.render = dim_formatters[dim_formats[k]]
+              }
+
+              if (v.type == 'date') {
+                col.render = d3.time.format(date_dim_parsers[v.label_short] || time_settings.day.format)
+              }
+
+              if (link_columns && link_columns[v.label_short] ) {
+
+                col.render = function(d) { return '<a target="_blank" href="' + link_columns[v.label_short] + d + '">' + d + '</a>' };
+                col.sClass = "linkCol";
+              }
+
+              columns.push(col)
+            }
+          });
+
+          var max_table_size = 10000
+          ;
+
+          $('#data-table')
+            .html(
+              $('<table></table>')
+              .attr("cellpadding", "0")
+              .attr("cellspacing", "0")
+              .attr("border", "0")
+              .addClass("display")
+              .attr("id", "data-datatable")
+            )
+          ;
+
+          console_time('create_all.make_datatable.define_recordsTable')
+          var recordsTable = $('#data-datatable').dataTable( {
+            "data": dims[primary_key].top(max_table_size),
+            "paging": true,
+            "info": true,
+            "order": [[1, "asc"]],
+            "searching": true,
+            "scrollX": true,
+            "columns": columns,
+            // this customizes the positioning of elements:
+            // ... see https://datatables.net/release-datatables/examples/basic_init/dom.html
+            "dom": '<"top"if>rt<"bottom"lp><"clear">',
+            "oLanguage": {
+              // TODO: click on (sampled) to configure sampling options
+              "sInfo": "Showing _START_ to _END_ of _TOTAL_ entries (sampled)",// text you want show for info section
             }
 
-            var columns = [];
-            $.each(meta_dims, function(k, v) {
+          });
+          console_time_end('create_all.make_datatable.define_recordsTable')
+          if (is_local == 1) { window.recordsTable = recordsTable }
 
-              if ( typeof v.date_source == 'undefined' ) {
-                var col = {
-                  data: v.label_short,
-                  title: titleify(v.label_short),
-                  defaultContent: ""
-                }
+          // <-- END make datatable -->
 
-                // for non-pk number types, 
-                if (number_types.indexOf(v.type) != -1 && typeof meta_lookup.primary_keys[k] == 'undefined') {
-                  col.render = get_xformatter(decide_rounding_by_dim(dims, v.label_short))
-                }
-                // override with dim_formatter
-
-                if (typeof dim_formats[k] != 'undefined' && typeof dim_formatters[dim_formats[k]] != 'undefined') {
-                  col.render = dim_formatters[dim_formats[k]]
-                }
-
-                if (v.type == 'date') {
-                  col.render = d3.time.format(date_dim_parsers[v.label_short] || time_settings.day.format)
-                }
-
-                if (link_columns && link_columns[v.label_short] ) {
-
-                  col.render = function(d) { return '<a target="_blank" href="' + link_columns[v.label_short] + d + '">' + d + '</a>' };
-                  col.sClass = "linkCol";
-                }
-
-                columns.push(col)
-              }
-            });
-
-            var max_table_size = 10000
-            ;
-
-            function makeParallelSections() {
+          dc.chartRegistry.list().forEach(function(chart) {
+            chart.on("filtered", function() {
+              RefreshTable(recordsTable, dims, max_table_size, primary_key);
               
-              // creates the parallel coords section (using quick_parallel_coords.make_parallel_coords)
-              // TODO: decouple from datatable
-              // for now data for parallel-coords will be a subset of selected data
-              // where it's a number type
-              var parallel_data = [];
-              // initialize to null
-              var series_key = null;
-              var dims_to_include = {};
-
-              console_time('create_all.make_datatable.makeParallelSections.get_parallel_data')
-              recordsTable.fnGetData().forEach(function(r, i) {
-                  var out = {};
-                  for (k in r) {
-                    // if (typeof meta_lookup.primary_keys[k] == 'undefined' && total_meta_lookup[k].type == "number" ) {
-                    // TODO: ^ this used to look at total_meta_lookup instead of meta_lookup... is there a reason?
-                    if (
-                      typeof meta_lookup.primary_keys[k] == 'undefined'
-                      && meta_lookup.dimensions[k]
-                      && meta_lookup.dimensions[k].type == "number"
-                    ) {
-                      out[k] = r[k];
-                      var input_order = meta_lookup.dimensions[k].input_order;
-                      dims_to_include[k] = input_order
-
-                    // } else if ( k == series_key || (series_key == null && total_meta_lookup[k].type == "string" && typeof meta_lookup.primary_keys[k] == 'undefined' )) {
-                    // TODO: ^ this used to look at total_meta_lookup instead of meta_lookup... is there a reason?
-                  } else if (
-                      k == series_key
-                      || (
-                        series_key == null
-                        && meta_lookup.dimensions[k]
-                        && meta_lookup.dimensions[k].type == "string"
-                        && typeof meta_lookup.primary_keys[k] == 'undefined'
-                      )
-                  ) {
-
-                      out[k] = r[k]
-                      // if this is the first non-pk string, set it as series key
-                      if ( series_key == null ) {
-                        series_key = k
-                      }
-                    }
-                  }
-                  parallel_data.push(out)
-
-              })
-              console_time_end('create_all.make_datatable.makeParallelSections.get_parallel_data')
-
-              if (typeof collected_params.colors !== 'undefined') {
-                var colorscheme = []
-                var hex_colors_from_url = _.map(collected_params["colors"].split(','), function(c) { return '#' + c })
-                hex_colors_from_url.forEach(function(c, i) {
-                    colorscheme[i] = c
-                })
-              }
-
-              // hacky set
-              dims_to_include = _.sortBy(_.keys(dims_to_include), function(k) { return dims_to_include[k] })
-              
-              console_time('create_all.make_datatable.makeParallelSections.make_paracoords')
+              // make_scatterplot_matrix(
+              //   'scatterplot-matrix',
+              //   dims[primary_key].top(max_splom_rows),
+              //   splom_dims_to_include,
+              //   // series_key || 1,
+              //   // TODO: enable series (color coding works as is
+              //   // but need to figure out whether they get separate
+              //   // best fit lines)
+              //   1,
+              //   colorscheme
+              // );
+          
               make_parallel_coords(
                 'parallel-coordinates',
-                parallel_data,
+                dims[primary_key].top(max_parallel_coords_rows),
                 // TODO: put dims in the right order (total_meta_lookup drops order from input)
                 dims_to_include,
                 // TODO: prioritize or choose series via UI
                 series_key || 1,
                 colorscheme
-              )
-              console_time_end('create_all.make_datatable.makeParallelSections.make_paracoords')
+              );
 
-              console_time('create_all.make_datatable.makeParallelSections.make_splom')
-              var max_scatterplot_size = 5;
-              var scatterplot_dims_to_include = dims_to_include.slice(0, max_scatterplot_size)
+            })
+          });
 
-              // TODO: why is this in MakeParallelCoords function?
-              // TODO: send in dimension format for scales & best fit equations
-              make_scatterplot_matrix(
-                'scatterplot-matrix',
-                parallel_data,
-                scatterplot_dims_to_include,
-                // series_key || 1,
-                // TODO: enable series (color coding works as is
-                // but need to figure out whether they get separate
-                // best fit lines)
-                1,
-                colorscheme
-              )
-              console_time_end('create_all.make_datatable.makeParallelSections.make_splom')
-
-            }
-
-            $('#data-table')
-              .html(
-                $('<table></table>')
-                .attr("cellpadding", "0")
-                .attr("cellspacing", "0")
-                .attr("border", "0")
-                .addClass("display")
-                .attr("id", "data-datatable")
-              )
-            ;
-
-            console_time('create_all.make_datatable.define_recordsTable')
-            var recordsTable = $('#data-datatable').dataTable( {
-              "data": dims[primary_key].top(max_table_size),
-              "paging": true,
-              "info": true,
-              "order": [[1, "asc"]],
-              "searching": true,
-              "scrollX": true,
-              "columns": columns,
-              // this customizes the positioning of elements:
-              // ... see https://datatables.net/release-datatables/examples/basic_init/dom.html
-              "dom": '<"top"if>rt<"bottom"lp><"clear">',
-              "oLanguage": {
-                // TODO: click on (sampled) to configure sampling options
-                "sInfo": "Showing _START_ to _END_ of _TOTAL_ entries (sampled)",// text you want show for info section
-              }
-
-            });
-            console_time_end('create_all.make_datatable.define_recordsTable')
-            if (is_local == 1) { window.recordsTable = recordsTable }
-
-            // <-- END make datatable -->
-
-            // <-- BEGIN make parallel_coords -->
-            // // TODO: decouple from datatable
-              // -- actually, might not be needed(?)
-            // // for now data for parallel-coords will be a subset of selected data
-            
-            // TODO: paracoords is slow, only render it when visible (also make it faster)
-            makeParallelSections()
-
-            // <-- END make parallel_coords -->
-
-            dc.chartRegistry.list().forEach(function(chart) {
-              chart.on("filtered", function() {
-                RefreshTable(recordsTable, dims, max_table_size, primary_key);
-                makeParallelSections();
-              })
-            });
+          console_time_end("create_all.make_datatable")
 
           $(".toggler").on("click", function() { 
               $(this).parent().siblings().toggle();
               $(this).toggleText("(show)", "(hide)");
             });
-
+          
           $("#records-selected-counter").toggle();
-          console_time_end("create_all.make_datatable")
 
           console_time('create_all.renderAll_init')
           dc.renderAll();
@@ -2357,7 +2523,8 @@
         collected_params[pieces[0]] = pieces[1]
       }; 
     });
-    var d3_version = collected_params.d3_version || '3'
+    
+    var d3_version = collected_params.d3_version || '4'
 
     if (d3_version =='3') {
       var script_imports = [
@@ -2372,8 +2539,8 @@
     }
     script_imports.push('./js/d3-time.v1.min.js')
     script_imports.push('./js/quick_parallel_coords.js')
-    script_imports.push('./js/quick_scatterplot_matrix.js')
 
+    var async_imports = false
     // TODO: this is embarassing, but I couldn't be bothered to make it recursive
     $.ajax({
       url: script_imports[0],
@@ -2383,28 +2550,18 @@
         $.ajax({
           url: script_imports[1],
           dataType: "script",
-          async: false,           // <-- This is the key
+          async: async_imports,           // <-- This is the key
           success:  function() {
             $.ajax({
               url: script_imports[2],
               dataType: "script",
-              async: false,           // <-- This is the key
+              async: async_imports,           // <-- This is the key
               success: function() {
                   $.ajax({
                     url: script_imports[3],
                     dataType: "script",
-                    async: false,           // <-- This is the key
-                    success: function() {
-                        $.ajax({
-                          url: script_imports[4],
-                          dataType: "script",
-                          async: false,           // <-- This is the key
-                          success: quickfilter,
-                          error: function () {
-                              throw new Error("Could not load script " + script);
-                          }
-                        })
-                      },
+                    async: async_imports,           // <-- This is the key
+                    success: quickfilter,
                     error: function () {
                         throw new Error("Could not load script " + script);
                     }
