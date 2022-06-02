@@ -31,6 +31,17 @@
         stroke-dasharray: 3,5;
       }
 
+      #splom td.heading
+      #splom td.diag {
+        vertical-align: middle
+      }
+
+      #splom tr.heading td,
+      #splom td.heading  {
+        font-size: 0.8em;
+      }
+
+
     </style>
     <link rel="stylesheet" type="text/css" href="./css/style.css">
     <link rel="stylesheet" type="text/css" href="./css/dc.css">
@@ -59,9 +70,6 @@
       <script type="text/javascript" src="./js/quick_parallel_coords.js"></script>
       <script type="text/javascript" src="./js/quick_scatterplot_matrix.js"></script>
     -->
-    
-  
-    
 
   <script>
   
@@ -128,17 +136,12 @@
         formatPercent0 = d3.format("%")
         ;
 
-      if (d3.version.startsWith('4.')) {
+      // if (d3.version.startsWith('4.')) {
         var formatDate = d3.timeFormat("%B %d, %Y"),
           formatDateShort = d3.timeFormat("%b. %d, %Y"),
           formatTime = d3.timeFormat("%I:%M %p")
         ;
-      } else {
-        var formatDate = d3.time.format("%B %d, %Y"),
-          formatDateShort = d3.time.format("%b. %d, %Y"),
-          formatTime = d3.time.format("%I:%M %p")
-        ;
-      }
+      // }
         
 
       // this is just a lookup that can be accessed by string
@@ -910,11 +913,9 @@
         var filter = options && options['filter'] || null;
         var time_incr = options && options['time_incr'] || 'day'
         
-        if (d3.version.startsWith('4.')) {
+        // if (d3.version.startsWith('4.')) {
           var tick_format = d3.timeFormat(time_settings[time_incr].format)
-        } else {  
-          var tick_format = d3.time.format(time_settings[time_incr].format)
-        }
+        // }
         
         var filterPrinter = options && options['filterPrinter'] || function(f) { return defaultFilterPrinter(f, tick_format) };
 
@@ -979,7 +980,7 @@
         // use lowest tick interval greater than target:
           .ticks(time_interval, ticks_intervals[0]) 
 
-        if (d3.version.startsWith('4.')) {
+        // if (d3.version.startsWith('4.')) {
           hist
             .x(d3.scaleTime().domain([domain_min, domain_max]))
           ;
@@ -989,16 +990,7 @@
               .tickFormat(d3.timeFormat(time_settings[time_incr].format))
           ;
           
-        } else {
-          hist
-            .x(d3.time.scale().domain([domain_min, domain_max]))
-          ;
-
-          hist
-            .xAxis()
-             .tickFormat(d3.time.format(time_settings[time_incr].format))
-          ;
-        }
+        // } 
 
         return hist
 
@@ -1069,7 +1061,7 @@
           .filterPrinter(filterPrinter)
         ;
 
-        if (d3.version.startsWith('4.')) {
+        // if (d3.version.startsWith('4.')) {
           hist
             .x(d3.scaleLinear()
               .domain([
@@ -1077,15 +1069,7 @@
                 domain_max
               ])
           )
-        } else {
-          hist
-            .x(d3.scale.linear()
-              .domain([
-                domain_min,
-                domain_max
-              ])
-          )
-        }
+        // }
 
         if (filter != null) {
           hist.filter(filter)
@@ -1288,7 +1272,11 @@
                     // )
                     .append(
                       $("<table></table>")
-                        .attr("id", "content")
+                        .attr("id", "splom")
+                    )
+                    .append(
+                      $("<table></table>")
+                        .attr("id", "splom-controls")
                     )
                   )
                   // <--- END scatterplot-matrix section --->
@@ -1670,11 +1658,9 @@
                 // r[dc] = d3.timeYear.offset(d3.time.format(date_parser).parse(r[dc].toString()), year_offset)
                 r[dc] = d3.timeYear.offset(d3.timeParse(date_parser)(r[dc].toString()), year_offset)
               } else {
-                if (d3.version.startsWith('4.')) {
+                // if (d3.version.startsWith('4.')) {
                   r[dc] = d3.timeYear.offset(d3.timeParse(date_parser)(r[dc]), year_offset)
-                } else {
-                  r[dc] = d3.timeYear.offset(d3.time.format(date_parser).parse(r[dc]), year_offset)
-                }              
+                // }              
               }
             })
 
@@ -1715,8 +1701,13 @@
 
           var all = ndx.groupAll();
 
-          dims = {};
+          var dims = {};
           var groups = {};
+
+          if (is_local == 1) {
+            window.dims = dims
+            window.groups = groups
+          }
 
           var get_rounder = function(r_factor) {
 
@@ -1908,6 +1899,7 @@
             })
           }
           colorscheme = colorscheme || default_colorscheme;
+
           
           // convert to ordered array; note coalesces null or undefined to Infinity to sort them last
           dims_to_include = _.sortBy(_.keys(dims_to_include), function(k) { return dims_to_include[k] || Infinity })
@@ -1929,7 +1921,7 @@
 
           console_time('makeParallelSections.make_splom')
 
-
+          // <-- make_splom
           // dynamic to number of dimensions (can only be sqrt(32 - # other dimensions))
           // TODO: write tests for this
           var max_splom_size = Math.max(0,Math.floor(Math.sqrt(32-_.keys(dims).length))); // 5x5
@@ -1939,24 +1931,12 @@
           }
           var splom_dims_to_include = dims_to_include.slice(0, max_splom_size)
           var max_splom_rows = 10000
-          // TODO: why is this in MakeParallelCoords function?
-          // TODO: send in dimension format for scales & best fit equations
-          // make_scatterplot_matrix(
-          //   'scatterplot-matrix',
-          //   dims[primary_key].top(max_splom_rows),
-          //   splom_dims_to_include,
-          //   // series_key || 1,
-          //   // TODO: enable series (color coding works as is
-          //   // but need to figure out whether they get separate
-          //   // best fit lines)
-          //   1,
-          //   colorscheme
-          // )
 
           var rows = ['heading'].concat(splom_dims_to_include.slice(0).reverse()),
               cols = ['heading'].concat(splom_dims_to_include)
           ;
           var splom_charts = [];
+          
           if (series_key) {
             var series_domain = _.pluck(groups[series_key + 's'].top(Infinity), 'key')
           } else {
@@ -1982,6 +1962,7 @@
           }
           
           function draw_regression_line(chart) {
+            console.log(chart.group())
             var xext = d3.extent(chart.group().all(), kv => kv.key[0]);
             var r = regression.linear(chart.group().all().map(kv => [kv.key[0], kv.key[1]])),
                 m = r.equation[0], b = r.equation[1],
@@ -2009,9 +1990,10 @@
               .call(do_points)
               .merge(line)
             ;
+            line.transition().duration(chart.transitionDuration()).call(do_points);
           }
 
-          d3.select('#content')
+          d3.select('#splom')
             .selectAll('tr').data(rows)
             .enter().append('tr').attr('class', function(d) {
                 return d === 'heading' ? 'heading row' : 'row';
@@ -2027,13 +2009,18 @@
                             if(col !== 'heading')
                                 cdiv.text(col.replace('_', ' '))
                             return;
-                        }
-                        else if(col === 'heading') {
+                        } else if(col === 'heading') {
                             cdiv.text(row.replace('_', ' '))
                             return;
+                        } else if (col === row) {
+                          cdiv
+                            .attr('class', 'diag')
+                            .text(row.replace('_', ' '))
+                          return;
                         }
                         cdiv.attr('class', 'chart-holder');
-                        var chart = new dc.ScatterPlot(cdiv);
+                        // var chart = new dc.ScatterPlot(cdiv);
+                        var chart = new dc.CompositeChart(cdiv);
                         var dim = make_dimension(col,row),
                         // TODO: create interaction grouper
                             group = dim.group()
@@ -2051,7 +2038,19 @@
                                 right: 0,
                                 bottom: showXAxis ? 20 : 5
                             })
-                            .dimension(dim).group(group)
+                            .compose([
+                              new dc.ScatterPlot(chart)
+                                .dimension(dim)
+                                .group(group)
+                                .symbolSize(7)
+                                .nonemptyOpacity(0.7)
+                                .emptySize(7)
+                                .emptyColor('#ccc')
+                                .emptyOpacity(0.7)
+                                .excludedSize(7)
+                                .excludedColor('#ccc')
+                                .excludedOpacity(0.7)
+                            ])
                             .keyAccessor(key_part(0))
                             .valueAccessor(key_part(1))
                             .colorAccessor(key_part(2))
@@ -2062,17 +2061,18 @@
                             .brushOn(true)
                             .elasticX(true)
                             .elasticY(true)
-                            .symbolSize(7)
-                            .nonemptyOpacity(0.7)
-                            .emptySize(7)
-                            .emptyColor('#ccc')
-                            .emptyOpacity(0.7)
-                            .excludedSize(7)
-                            .excludedColor('#ccc')
-                            .excludedOpacity(0.7)
+                            // .symbolSize(7)
+                            // .nonemptyOpacity(0.7)
+                            // .emptySize(7)
+                            // .emptyColor('#ccc')
+                            // .emptyOpacity(0.7)
+                            // .excludedSize(7)
+                            // .excludedColor('#ccc')
+                            // .excludedOpacity(0.7)
                             .renderHorizontalGridLines(true)
                             .renderVerticalGridLines(true)
                         ;
+
                         chart.xAxis().ticks(6);
                         chart.yAxis().ticks(6);
                         chart.on('postRender', function(chart) {
@@ -2085,32 +2085,30 @@
                             chart.select('.chart-body').attr('clip-path', null);
 
                             // <--regression line
-                            if (row !== col) {
-                              draw_regression_line(chart)
-                            }
+                            // if (row !== col) {
+                            //   draw_regression_line(chart)
+                            // }
                             // regression line -->
 
                         });
                         // only filter on one chart at a time
                         chart.on('filtered', function(_, filter) {
+                          console.log(3)
                             if(!filter)
                                 return;
                             splom_charts.forEach(function(c) {
+                              console.log(2)
                                 if(c !== chart)
                                     c.filter(null);
-                                    draw_regression_line(c)
                             });
                         });
-
 
                         splom_charts.push(chart);
                     });
               });
 
-
-
           console_time_end('makeParallelSections.make_splom')
-          // <-- end parallel sections -->
+          // <-- end make_splom -->
 
           console_time("create_all.make_datatable")
           // <-- BEGIN datatable -->
@@ -2148,7 +2146,10 @@
               }
 
               if (v.type == 'date') {
-                col.render = d3.time.format(date_dim_parsers[v.label_short] || time_settings.day.format)
+                console.log(v.label_short)
+                // if (d3.version.startsWith('4.')) {
+                  col.render = d3.timeFormat(date_dim_parsers[v.label_short] || time_settings.day.format)
+                // }
               }
 
               if (link_columns && link_columns[v.label_short] ) {
@@ -2175,7 +2176,6 @@
             )
           ;
 
-          console_time('create_all.make_datatable.define_recordsTable')
           var recordsTable = $('#data-datatable').dataTable( {
             "data": dims[primary_key].top(max_table_size),
             "paging": true,
@@ -2193,27 +2193,21 @@
             }
 
           });
-          console_time_end('create_all.make_datatable.define_recordsTable')
+
+          console_time_end("create_all.make_datatable")
           if (is_local == 1) { window.recordsTable = recordsTable }
+
 
           // <-- END make datatable -->
 
           dc.chartRegistry.list().forEach(function(chart) {
             chart.on("filtered", function() {
+
+              console_time("create_all.refresh_datatable")
               RefreshTable(recordsTable, dims, max_table_size, primary_key);
-              
-              // make_scatterplot_matrix(
-              //   'scatterplot-matrix',
-              //   dims[primary_key].top(max_splom_rows),
-              //   splom_dims_to_include,
-              //   // series_key || 1,
-              //   // TODO: enable series (color coding works as is
-              //   // but need to figure out whether they get separate
-              //   // best fit lines)
-              //   1,
-              //   colorscheme
-              // );
-          
+              console_time_end("create_all.refresh_datatable")
+                     
+              console_time("create_all.refresh_paracoords")
               make_parallel_coords(
                 'parallel-coordinates',
                 dims[primary_key].top(max_parallel_coords_rows),
@@ -2223,11 +2217,10 @@
                 series_key || 1,
                 colorscheme
               );
+              console_time_end("create_all.refresh_paracoords")
 
             })
           });
-
-          console_time_end("create_all.make_datatable")
 
           $(".toggler").on("click", function() { 
               $(this).parent().siblings().toggle();
@@ -2499,6 +2492,7 @@
         metadata_fnm = 'metadata.json'
       }
 
+
       run(fnm_path, data_fnm, metadata_fnm);
 
     }
@@ -2531,6 +2525,11 @@
         './js/d3.v3.min.js',
         './js/dc.min.js',
       ]      
+    } else if (d3_version == '7') {
+      var script_imports = [
+        "./js/d3.v6.6.2.js"
+        , "./js/dc.v4.js"
+      ] 
     } else {
       var script_imports = [
         "./js/d3.v4.min.js"
