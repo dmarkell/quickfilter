@@ -2478,7 +2478,7 @@
         is_local = window.location.origin.startsWith('http://localhost') || window.location.origin.startsWith('http://0.0.0.0');
       }
       
-      default_fnm_path = is_local == 1 ? "../datasets/" : 'http://quickfilter.s3-website-us-east-1.amazonaws.com/datasets/'
+      default_fnm_path = is_local == 1 ? "../datasets/" : 'https://quickfilter.s3-website-us-east-1.amazonaws.com/datasets/'
       console.log(default_fnm_path)
      // prefix will be used for both data_fnm and metadata_fnm
       var fnm_prefix = collected_params.fnm_prefix;
