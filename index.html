@@ -2372,6 +2372,7 @@
 
             })
           } else {
+
               var total_meta_lookup = {}
               var slice = results_data.data[0]
               $.each(slice, function(k,v) {
@@ -2380,6 +2381,7 @@
                   "type": typeof v
                 }
               })
+
               get_meta_and_run(total_meta_lookup, results_data)
 
           }
@@ -2473,11 +2475,11 @@
 
       var is_local = collected_params.is_local
       if (typeof is_local == 'undefined') {
-        is_local = window.location.origin.startsWith('http://0.0.0.0');  
+        is_local = window.location.origin.startsWith('http://localhost') || window.location.origin.startsWith('http://0.0.0.0');
       }
       
       default_fnm_path = is_local == 1 ? "../datasets/" : 'http://quickfilter.s3-website-us-east-1.amazonaws.com/datasets/'
-
+      console.log(default_fnm_path)
      // prefix will be used for both data_fnm and metadata_fnm
       var fnm_prefix = collected_params.fnm_prefix;
       var fnm_path = collected_params.fnm_path || default_fnm_path;
@@ -2489,9 +2491,8 @@
         metadata_fnm = collected_params.metadata_fnm
       } else {
         data_fnm = 'data.json'
-        metadata_fnm = 'metadata.json'
+        // no metadata file by default
       }
-
 
       run(fnm_path, data_fnm, metadata_fnm);
 
