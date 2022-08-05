@@ -2475,10 +2475,10 @@
 
       var is_local = collected_params.is_local
       if (typeof is_local == 'undefined') {
-        is_local = window.location.origin.startsWith('http://localhost') || window.location.origin.startsWith('http://0.0.0.0');
+        // is_local = window.location.origin.startsWith('http://localhost') || window.location.origin.startsWith('http://0.0.0.0');
       }
       
-      default_fnm_path = is_local == 1 ? "../datasets/" : 'https://quickfilter.s3-website-us-east-1.amazonaws.com/datasets/'
+      default_fnm_path = is_local == 1 ? "../datasets/" : 'https://quickfilter.s3.amazonaws.com/datasets/'
 
      // prefix will be used for both data_fnm and metadata_fnm
       var fnm_prefix = collected_params.fnm_prefix;
