@@ -133,7 +133,7 @@
         formatChange = d3.format("+,d"),
         formatPercent2 = d3.format(".2%"),
         formatPercent1 = d3.format(".1%"),
-        formatPercent0 = d3.format("%")
+        formatPercent0 = d3.format(".0%")
         ;
 
       // if (d3.version.startsWith('4.')) {
@@ -274,6 +274,13 @@
         /// OR {"metric": "metric1", "type": "ratio", "numer": "numerator_metric", "denom": 2} [with 1 metric name & 1 scalar]
         /// ... so to each `row` is added row[metric1] = row[numerator_metric]/2
         /// TODO: implement more complicated derived metrics [maybe just pass in an explicit function/SQL, with "safety checks"]
+        /// OR {"metric": "metric1", "type": "absolute", "input_metric": "input_metric1"} [with 1 metric name & 1 string]
+        /// ... so to each `row` is added row[metric1] = Math.abs(row["input_metric1"])
+
+        /// OR {"metric": "metric1", "type": "function", "input_metric": "input_metric1", "function": "function(arguments) { return arguments[0] }"} [with 1 metric name & 2 strings]
+        /// ... so to each `row` is added row[metric1] = Math.abs(row["input_metric1"])
+        /// TODO: make sure this is safe!
+        /// TODO: allow multiple `input_metric`s to be sent in as args
 
         rows.forEach(function(r) {
           metrics.forEach(function(m) {
@@ -293,6 +300,32 @@
               total_meta_lookup[m.metric] = {'label_short': m.metric, 'type': 'number'}
               r[m.metric] = result
 
+            } else if (m.type == "absolute") {
+              
+              if ( typeof m.input_metric != 'undefined' ) {
+                
+                meta_dims[m.metric] = {'label_short': m.metric, 'type': 'number'}
+                total_meta_lookup[m.metric] = {'label_short': m.metric, 'type': 'number'}
+                r[m.metric] = Math.abs(r[m.input_metric]);
+              } else {
+                console.warn("Metric type `absolute` requires string at `input_metric`")
+              }
+
+
+            } else if (m.type == "function") {
+
+              if ( typeof m.input_metric != 'undefined' && typeof m.function != 'undefined' ) {
+                
+                meta_dims[m.metric] = {'label_short': m.metric, 'type': 'number'}
+                total_meta_lookup[m.metric] = {'label_short': m.metric, 'type': 'number'}
+                var func = new Function(m.function);
+                r[m.metric] = func.call(null, r[m.input_metric]);
+                // console.log(func.call(null, r[m.input_metric]))
+              } else {
+                console.warn("Metric type `function` requires string at `input_metric`, string at `function`")
+              }
+
+
             } else {
               console.warn("Metric type `" + m.type + "` not yet implemented")
             }
@@ -306,8 +339,8 @@
         return arr.every(function(e, i, a) { if (i) return e > a[i-1]; else return true; })
       };
 
+      // TODO: implement this via `derived columns` function type to clean up (although this converts in place)
       var convert_to_log = function(rows, dims, meta_dims) {
-
         rows.forEach(function(r) {
 
           dims.forEach(function(n) {
@@ -1583,7 +1616,23 @@
 
           // this cleans some things but also only keeps the selected columns
           // since the others don't need to be included in the crossfilter ndx
+
           // TODO: delete the rest of the data from memory after?
+
+          // Gather other dims that will be needed even if they aren't included
+
+          // get log dims here so we can add to rows
+          var dims_to_convert_to_log = [];
+          if (typeof collected_params.log_columns !== 'undefined') {
+
+            log_columns = url_param_to_json(collected_params.log_columns);
+            log_columns.forEach(function(c) {
+              dims_to_convert_to_log.push(c) 
+            })
+          };
+
+          // TODO!: add columns to be converted to log to rows
+
           var rows = [];
           console_time('create_all.cleaned_data')
           results.data.forEach(function(el) {
@@ -1603,6 +1652,7 @@
           })
           // <-- BEGIN parse and clean dataset -->
           console_time_end('create_all.cleaned_data')
+          console.log(rows)
 
           var dim_formats;
           if (typeof collected_params.dim_formats !== 'undefined') {
@@ -1611,18 +1661,15 @@
             dim_formats = {};
           }
           
-          var dims_to_convert_to_log = [];
-          if (typeof collected_params.log_columns !== 'undefined') {
-
-            log_columns = url_param_to_json(collected_params.log_columns);
-            log_columns.forEach(function(c) {
-              dims_to_convert_to_log.push(c) 
-            })
-          };
+          // now go through and conver the log dims...
 
           if (dims_to_convert_to_log.length > 0) {
             convert_to_log(rows, dims_to_convert_to_log, meta_dims);
           }
+
+          /// ...
+
+
 
           // TODO: might have to add underlying numbers of number_bin columns
           // hacky set
@@ -1924,7 +1971,9 @@
           // <-- make_splom
           // dynamic to number of dimensions (can only be sqrt(32 - # other dimensions))
           // TODO: write tests for this
-          var max_splom_size = Math.max(0,Math.floor(Math.sqrt(32-_.keys(dims).length))); // 5x5
+          // var max_splom_size = Math.max(0,Math.floor(Math.sqrt(32-_.keys(dims).length))); // 5x5
+          var max_splom_size = 5
+
           // var max_splom_size = 3
           if (max_splom_size < 5) {
             console.warn("Scatterplot Matrix limited to " + max_splom_size + ' X ' + max_splom_size + ' due to limit of 32 dimensions in Crossfilter (see https://github.com/square/crossfilter/wiki/API-Reference#dimension' )
@@ -2146,7 +2195,6 @@
               }
 
               if (v.type == 'date') {
-                console.log(v.label_short)
                 // if (d3.version.startsWith('4.')) {
                   col.render = d3.timeFormat(date_dim_parsers[v.label_short] || time_settings.day.format)
                 // }
@@ -2335,7 +2383,7 @@
           if (err) {
             console.log(err)
           }
-
+          // console.log(results_data)
           // TODO: replace with jq-like syntax
           if (typeof collected_params.json_extract != 'undefined') {
             results_data = {'data': results_data[collected_params.json_extract]}
@@ -2475,7 +2523,7 @@
 
       var is_local = collected_params.is_local
       if (typeof is_local == 'undefined') {
-        // is_local = window.location.origin.startsWith('http://localhost') || window.location.origin.startsWith('http://0.0.0.0');
+        is_local = window.location.origin.startsWith('http://localhost') || window.location.origin.startsWith('http://0.0.0.0');
       }
       
       default_fnm_path = is_local == 1 ? "../datasets/" : 'https://quickfilter.s3.amazonaws.com/datasets/'
