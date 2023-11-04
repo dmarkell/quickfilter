@@ -6,6 +6,7 @@
     <link rel="stylesheet" type="text/css" href="./css/quick_parallel_coords_style.css">
     <title id="title">quickfilter</title>
     <style>
+
       .linkCol {
         text-align: left;
       }
@@ -17,7 +18,7 @@
 
       a:hover {
         text-decoration:underline;
-        color: blue;
+        color: steelblue;
       }
 
       .section-header {
@@ -39,6 +40,16 @@
       #splom tr.heading td,
       #splom td.heading  {
         font-size: 0.8em;
+      }
+
+      .regression_formula,
+      .regression_r2 {
+        font-size: 0.8em;
+        fill:  tomato;
+      }
+
+      div.row_header {
+        vertical-align:  top;
       }
 
 
@@ -838,20 +849,32 @@
       }
 
      function RefreshTable(recordsTable, dims, max_table_size, primary_key) {
+        
+        for ( var i = 0; i<recordsTable.length; i++) {
+          // cycle through recordsTable tables
+          // set current API index (https://www.datatables.net/forums/discussion/4384/how-do-i-make-api-calls-when-using-multiple-tables)
+          $.fn.dataTableExt.iApiIndex = i
 
-        dc.events.trigger(function() {
-          var cur_table_size = recordsTable.fnGetData().length;
-          var filtered_data = dims[primary_key].top(max_table_size);
-          recordsTable.fnClearTable();
-          if (filtered_data.length > 0) {
-            recordsTable.fnAddData(filtered_data);  
-            recordsTable.fnDraw();
-            // re-hide table if it was hidden before
-            if ($("#table-toggler").text() == '(show)') {
-              $("#data-datatable tr").hide();
+          dc.events.trigger(function() {
+            var cur_table_size = recordsTable.fnGetData().length;  
+            var filtered_data = dims[primary_key].top(max_table_size);
+            recordsTable.fnClearTable();
+            if (filtered_data.length > 0) {
+              recordsTable.fnAddData(filtered_data);  
+              recordsTable.fnDraw();
+              // re-hide table if it was hidden before
+              if ($("#table-toggler").text() == '(show)') {
+                // $("#data-datatable tr").hide();
+                $(".data-datatable tr").hide();
+              }
             }
-          }
-        });
+          });
+
+        }
+
+        // reset index to 0
+        $.fn.dataTableExt.iApiIndex = 0;
+
       }
 
       function make_row_chart(dim, options, dims, groups) {
@@ -1168,9 +1191,14 @@
                     }
                   }
                 }(),
+            // todo: generalize these
+            "p05": percentile_grouper,
+            "p10": percentile_grouper,
             "p20": percentile_grouper,
             "p50": percentile_grouper,
             "p80": percentile_grouper,
+            "p90": percentile_grouper,
+            "p95": percentile_grouper,
             "Sum": function(g) { return g.reduceSum(function(d) { return d[dim] }) }
           }
 
@@ -1184,9 +1212,14 @@
                   }
                 }(),
             "Sum": function(d) { return d },
+            // todo: generalize these
+            "p05": function(d) { return percentileAccessor(d, 0.05) },
+            "p10": function(d) { return percentileAccessor(d, 0.1) },
             "p20": function(d) { return percentileAccessor(d, 0.2) },
             "p50": function(d) { return percentileAccessor(d, 0.5) },
-            "p80": function(d) { return percentileAccessor(d, 0.8) }
+            "p80": function(d) { return percentileAccessor(d, 0.8) },
+            "p90": function(d) { return percentileAccessor(d, 0.9) },
+            "p95": function(d) { return percentileAccessor(d, 0.95) }
           }
 
           var ndGrouper = groupers[stat];
@@ -1205,7 +1238,16 @@
             .valueAccessor(ndAccessor)
         };
 
-        var annotations = options['annotations'] || ["Avg", "p20", "p50", "p80"];
+        // define chart annotations (can be added from url param)
+        // TODO this might not go here
+        var annotations;
+        var chart_annotations = collected_params['chart_annotations'];
+          if ( typeof chart_annotations != 'undefined' ) {
+            annotations = url_param_to_json(chart_annotations)
+        } else {
+          annotations = options['annotations'] || ["Avg", "p20", "p50", "p80"];
+        }
+        // end
 
         annotations.forEach(function(item) {
           make_number_display(item);
@@ -1218,6 +1260,10 @@
       var create_container = function(meta_lookup, total_meta_lookup) {
         var meta_pks = meta_lookup.primary_keys;
         var meta_dims = meta_lookup.dimensions;
+        var top_title_prefix = collected_params['top_title_prefix'];
+        if ( typeof top_title_prefix == 'undefined' ) {
+          top_title_prefix = 'quick'
+        }
         var element = $('body');
         element.html("");
 
@@ -1227,7 +1273,7 @@
                   .attr("id", "title-block")
                   .append(
                     $("<h1></h1>").css("float", "left")
-                      .append($("<span></span>").addClass("logo-blue").text("quick"))
+                      .append($("<span></span>").addClass("logo-blue").text(top_title_prefix))
                       .append($("<span></span>").text("filter"))
                   )
               )
@@ -1284,7 +1330,7 @@
                         .append($("<span></span>").addClass("toggler").text("(hide)"))
                     )
                     .append(
-                      $("<div></div>").attr("id", "data-table")
+                      $("<div></div>").attr("id", "data-tables")
                     )
                   )
                   // <--- END DataTable section --->
@@ -1598,7 +1644,7 @@
           if ( typeof top_filter != 'undefined' ) {
             top_filter = url_param_to_json(top_filter)
           }
-          // use top grep to remove rows
+          // use top_filter to remove rows before creation
           // currently only takes case insensitive match
           if (typeof top_filter != 'undefined') {
             var clean_results = [];
@@ -1652,7 +1698,6 @@
           })
           // <-- BEGIN parse and clean dataset -->
           console_time_end('create_all.cleaned_data')
-          console.log(rows)
 
           var dim_formats;
           if (typeof collected_params.dim_formats !== 'undefined') {
@@ -1899,9 +1944,11 @@
             window[k + 'Chart'] = chart_obj;
 
             if (dim_filters && typeof dim_filters[k] != 'undefined') {
+              
               // TODO: check validity; only allow range filter (array with two positive monitone integers)
               chart_obj.filter(dim_filters[k])
               dims[k].filter(dim_filters[k])
+
             }
 
           });
@@ -1975,9 +2022,10 @@
           var max_splom_size = 5
 
           // var max_splom_size = 3
-          if (max_splom_size < 5) {
+          if (max_splom_size < dims_to_include.length) {
             console.warn("Scatterplot Matrix limited to " + max_splom_size + ' X ' + max_splom_size + ' due to limit of 32 dimensions in Crossfilter (see https://github.com/square/crossfilter/wiki/API-Reference#dimension' )
           }
+          
           var splom_dims_to_include = dims_to_include.slice(0, max_splom_size)
           var max_splom_rows = 10000
 
@@ -2011,11 +2059,15 @@
           }
           
           function draw_regression_line(chart) {
-            console.log(chart.group())
-            var xext = d3.extent(chart.group().all(), kv => kv.key[0]);
-            var r = regression.linear(chart.group().all().map(kv => [kv.key[0], kv.key[1]])),
-                m = r.equation[0], b = r.equation[1],
-                [x1, x2] = chart.x().domain();
+            var scatterChart = chart.children()[0];
+
+            var xext = d3.extent(scatterChart.group().all(), kv => kv.key[0]);
+            var r = regression.linear(scatterChart.group().all().map(kv => [kv.key[0], kv.key[1]])),
+                m = r.equation[0],
+                b = r.equation[1],
+                r_2 = r.r2,
+                [x1, x2] = chart.x().domain()
+            ;
             var points = [[
                 x1,
                 m * x1 + b
@@ -2040,6 +2092,32 @@
               .merge(line)
             ;
             line.transition().duration(chart.transitionDuration()).call(do_points);
+
+            var padding = 30;
+            chart.g()
+              .append("text")
+                .attr("class", "regression_formula")
+                .attr("x", padding)
+                .attr("y", padding)
+                .text(function(d) {
+                  var out = 'y = '
+                  out += formatPrec1(m)
+                  out += 'x + '
+                  out += formatPrec1(b)
+                  return  out
+                })
+            ;
+            chart.g()
+              .append("text")
+                .attr("class", "regression_r2")
+                .attr("x", padding)
+                .attr("y", padding * 2)
+                .text(function(d) {
+                  var out = 'R2 = '
+                  out += formatPrec2(r_2)
+                  return  out
+                })
+
           }
 
           d3.select('#splom')
@@ -2054,17 +2132,21 @@
                     })
                     .each(function(col, x) {
                         var cdiv = d3.select(this).append('div')
-                        if(row === 'heading') {
+                        if (row === 'heading') {
                             if(col !== 'heading')
-                                cdiv.text(col.replace('_', ' '))
+                                cdiv
+                                  .text(col.replace('_', ' '))
+                                  .attr('class', 'col_header')
                             return;
                         } else if(col === 'heading') {
-                            cdiv.text(row.replace('_', ' '))
+                            cdiv
+                              .attr('class', 'row_header')
+                              .text(row.replace('_', ' '))
                             return;
                         } else if (col === row) {
                           cdiv
                             .attr('class', 'diag')
-                            .text(row.replace('_', ' '))
+                            // .text(row.replace('_', ' '))
                           return;
                         }
                         cdiv.attr('class', 'chart-holder');
@@ -2134,9 +2216,9 @@
                             chart.select('.chart-body').attr('clip-path', null);
 
                             // <--regression line
-                            // if (row !== col) {
-                            //   draw_regression_line(chart)
-                            // }
+                            if (row !== col) {
+                              draw_regression_line(chart)
+                            }
                             // regression line -->
 
                         });
@@ -2174,10 +2256,18 @@
             link_columns = url_param_to_json(collected_params.link_columns);
           }
 
+          if (typeof collected_params.link_columns !== 'undefined') {
+
+            link_columns = url_param_to_json(collected_params.link_columns);
+
+          }
+
           var columns = [];
           $.each(meta_dims, function(k, v) {
-
+            
+            // todo: move these checks to a separate function
             if ( typeof v.date_source == 'undefined' ) {
+
               var col = {
                 data: v.label_short,
                 title: titleify(v.label_short),
@@ -2210,21 +2300,54 @@
             }
           });
 
-          var max_table_size = 10000
-          ;
+          var max_table_size = 10000;
 
-          $('#data-table')
-            .html(
-              $('<table></table>')
-              .attr("cellpadding", "0")
-              .attr("cellspacing", "0")
-              .attr("border", "0")
-              .addClass("display")
-              .attr("id", "data-datatable")
-            )
-          ;
+          var datatable_count = 1;
+          // var datatable_count = 3;
 
-          var recordsTable = $('#data-datatable').dataTable( {
+          for ( var i = 0; i < datatable_count; i++ ) {
+
+            var tbl_div = $('<div></div>')
+
+            var toggle_col_div = $("<div></div>")
+              .addClass("data-table-column-toggle")
+              .css("text-align", "left")
+            ;
+
+            toggle_col_div.text('Toggle columns: ')
+            columns.forEach(function(v,k) { 
+              toggle_col_div.append(
+                $('<a></a>')
+                  .addClass('table-col-toggle-vis')
+                  .attr('data-table-ix', i)
+                  .attr('data-column-ix', k)
+                  .text(v.title)
+              )
+              if ( k < columns.length - 1 ) {
+                toggle_col_div.append($('<span></span>').text(' - '))
+              }
+
+            });
+
+
+            tbl_div.append(toggle_col_div)
+
+            var tbl = $('<table></table>')
+                .attr("cellpadding", "0")
+                .attr("cellspacing", "0")
+                .attr("border", "0")
+                .addClass("display")
+                // .attr("id", "data-datatable")
+                .attr("class", "data-datatable")
+            ;
+            
+            tbl_div.append(tbl)
+            $('#data-tables').append(tbl_div)
+
+          }
+
+          // var recordsTable = $('#data-datatable').dataTable( {
+          var recordsTable = $('.data-datatable').dataTable( {
             "data": dims[primary_key].top(max_table_size),
             "paging": true,
             "info": true,
@@ -2240,6 +2363,26 @@
               "sInfo": "Showing _START_ to _END_ of _TOTAL_ entries (sampled)",// text you want show for info section
             }
 
+          });
+
+          // add event listener to toggle columns
+          // https://datatables.net/examples/api/show_hide.html
+          document.querySelectorAll('a.table-col-toggle-vis').forEach((el) => {
+              el.addEventListener('click', function (e) {
+                  e.preventDefault();
+           
+                  let table_ix = e.target.getAttribute('data-table-ix');
+                  let col_ix = e.target.getAttribute('data-column-ix');
+           
+                  // set current API index (https://www.datatables.net/forums/discussion/4384/how-do-i-make-api-calls-when-using-multiple-tables)
+                  $.fn.dataTableExt.iApiIndex = table_ix
+                  
+                  recordsTable.fnSetColumnVis(col_ix, !recordsTable.fnSettings().aoColumns[col_ix].bVisible)
+
+                  // reset current API index
+                  $.fn.dataTableExt.iApiIndex = 0
+
+              });
           });
 
           console_time_end("create_all.make_datatable")
@@ -2284,7 +2427,7 @@
           // hide sections that should start hidden
           $("#dimension-controls-wrapper .toggler").click()
           $("#data-table-wrapper .toggler").click()
-          // $("#parallel-coordinates-wrapper .toggler").click()
+          $("#parallel-coordinates-wrapper .toggler").click()
           // $("#scatterplot-matrix-wrapper .toggler").click()
 
         // })
@@ -2481,7 +2624,14 @@
 
       var dim_filters = collected_params['dim_filters'];
         if ( typeof dim_filters != 'undefined' ) {
+
           dim_filters = url_param_to_json(dim_filters)
+          // check that this input is an object (not array)
+          // TODO: general warning system if inputs don't match, linking to wiki or documentation
+          // in the meantime this is per https://stackoverflow.com/questions/2265922/how-to-check-if-an-object-is-not-an-array
+          if ( dim_filters?.constructor !== Object ) {
+            console.warn("`dim_filters` input requires object with arrays or static values.")
+          }
       }
 
       var date_dim_parsers;
